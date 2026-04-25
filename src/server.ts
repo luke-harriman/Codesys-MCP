@@ -1118,10 +1118,10 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'install_addon_from_file',
-    "Installs a CODESYS .package add-on (e.g. WAGO PFC libraries bundle, vendor packages) into a CODESYS installation by shelling out to APInstaller.CLI.exe --installAddOnFromFile. Use this for .package bundles; use install_library_file for plain .library files. Does not need CODESYS UI to be running.",
+    "Installs a CODESYS .package add-on (e.g. WAGO PFC libraries bundle, vendor packages) into a CODESYS installation by shelling out to APInstaller.CLI.exe --installAddOnFromFile. Use this for .package bundles; use install_library_file for plain .library files. Does not need CODESYS UI to be running. NOTE: writes under C:\\Program Files\\CODESYS\\... so requires admin rights -- the MCP server itself must have been launched elevated, otherwise APInstaller exits with 'This command needs elevated rights to run.'",
     {
       packageFilePath: z.string().describe("Full path to the .package file to install."),
-      installation: z.string().optional().describe("Installation location (e.g. 'C:\\\\Program Files\\\\CODESYS 3.5.21.50'). Defaults to the parent of this MCP's configured CODESYS install."),
+      installation: z.string().optional().describe("CODESYS install root (e.g. 'C:\\\\Program Files\\\\CODESYS 3.5.21.50\\\\CODESYS' -- the directory containing Common\\\\CODESYS.exe). Defaults to the install root derived from this MCP's configured CODESYS path."),
     },
     async (args: { packageFilePath: string; installation?: string }) => {
       const cli = locateAPInstallerCli();
@@ -1141,9 +1141,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           isError: true,
         };
       }
-      // Default installation location = parent of CODESYS\Common\CODESYS.exe
-      // i.e. three dirnames up from config.codesysPath
-      const defaultLocation = path.dirname(path.dirname(path.dirname(config.codesysPath)));
+      // Default installation location = the CODESYS install root, i.e.
+      // C:\Program Files\CODESYS 3.5.XX.YY\CODESYS. config.codesysPath
+      // points at ...\CODESYS\Common\CODESYS.exe, so two dirnames up.
+      // (APInstaller --location wants this exact directory; the parent
+      // 'C:\Program Files\CODESYS 3.5.XX.YY' is rejected with
+      // "No installation was found in the directory ...".)
+      const defaultLocation = path.dirname(path.dirname(config.codesysPath));
       const location = args.installation && args.installation.trim().length > 0
         ? path.normalize(args.installation)
         : defaultLocation;
