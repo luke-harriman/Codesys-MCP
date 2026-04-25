@@ -59,6 +59,14 @@ try:
 
     print("DEBUG: push returned without exception.")
 
+    # Per helpme-codesys.com Git scripting docs: example flows show
+    # project.save() after push (and after merge). Soft-fail.
+    try:
+        primary_project.save()
+        print("DEBUG: project.save() succeeded after push.")
+    except Exception as save_e:
+        print("WARNING: project.save() after push raised: %s -- post-push state may not persist." % save_e)
+
     branch = "?"
     if hasattr(git, 'branch_show_current'):
         try:

@@ -57,6 +57,16 @@ try:
     git.init(LOCAL_REPO_PATH)
     print("DEBUG: init returned without exception.")
 
+    # Persist the new git binding to the .project file. Per the helpme-codesys.com
+    # Git scripting page, project.save() is required after mutating git ops to
+    # avoid losing the binding/state when the project is closed. Soft-fail: the
+    # git op already succeeded, so a save error is logged but not raised.
+    try:
+        primary_project.save()
+        print("DEBUG: project.save() succeeded after init.")
+    except Exception as save_e:
+        print("WARNING: project.save() after init raised: %s -- git binding may not persist across IDE sessions." % save_e)
+
     # Re-read the binding to pick up the now-existing repo
     git = getattr(primary_project, 'git', None)
     branch = "?"

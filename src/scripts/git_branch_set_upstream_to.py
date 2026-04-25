@@ -33,6 +33,14 @@ try:
         git.branch_set_upstream_to(REMOTE_NAME)
     print("DEBUG: branch_set_upstream_to returned without exception.")
 
+    # Per helpme-codesys.com Git scripting docs: persist project state after
+    # tracking-config changes. Soft-fail (git op already succeeded).
+    try:
+        primary_project.save()
+        print("DEBUG: project.save() succeeded after branch_set_upstream_to.")
+    except Exception as save_e:
+        print("WARNING: project.save() after branch_set_upstream_to raised: %s -- tracking config may not persist across IDE sessions." % save_e)
+
     current = "?"
     if hasattr(git, 'branch_show_current'):
         try:

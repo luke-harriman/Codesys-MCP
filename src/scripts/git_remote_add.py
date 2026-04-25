@@ -29,6 +29,14 @@ try:
     git.remote_add(REMOTE_NAME, REMOTE_URL)
     print("DEBUG: remote_add returned without exception.")
 
+    # Per helpme-codesys.com Git scripting docs: persist project state after
+    # remote changes. Soft-fail (git op already succeeded).
+    try:
+        primary_project.save()
+        print("DEBUG: project.save() succeeded after remote_add.")
+    except Exception as save_e:
+        print("WARNING: project.save() after remote_add raised: %s -- remote may not persist across IDE sessions." % save_e)
+
     print("Added remote '%s' -> %s" % (REMOTE_NAME, REMOTE_URL))
     print("SCRIPT_SUCCESS: git_remote_add complete.")
     sys.exit(0)

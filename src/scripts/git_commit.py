@@ -37,6 +37,14 @@ try:
     git.commit_complete(COMMIT_MESSAGE, AUTHOR_NAME, AUTHOR_EMAIL)
     print("DEBUG: commit_complete returned without exception.")
 
+    # Per helpme-codesys.com Git scripting docs: persist project state after
+    # commits. Soft-fail (git op already succeeded).
+    try:
+        primary_project.save()
+        print("DEBUG: project.save() succeeded after commit.")
+    except Exception as save_e:
+        print("WARNING: project.save() after commit raised: %s -- project state may not persist across IDE sessions." % save_e)
+
     # Best-effort: report current branch after commit
     branch = "?"
     if hasattr(git, 'branch_show_current'):
