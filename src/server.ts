@@ -1202,7 +1202,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'list_project_libraries',
-    "Lists every library referenced anywhere in the CODESYS project: walks the project tree, finds every ScriptLibManObjectContainer (the project itself + each Application), gets the Library Manager via container.get_library_manager(), and enumerates lm.references for structured per-reference info (name, namespace, system/placeholder/managed flags, effective resolution). Output is grouped by container so you can see which Application owns which libraries. Per the helpme-codesys.com docs and the local SP22 stub Stubs/scriptengine/ScriptLibManObject.pyi.",
+    "Lists every library referenced anywhere in the CODESYS project AND captures project-level metadata above the library list: Project Information (version, title, company, author), CODESYS Development System version (from IronPython sys.version), and every device's offline target identification triple (type / id / version) -- the offline 'firmware' the project is built against. The library list itself walks the project tree, finds every ScriptLibManObjectContainer (the project + each Application), gets the Library Manager via container.get_library_manager(), and enumerates lm.references for structured per-reference info (name, namespace, system/placeholder/managed flags, effective resolution). Per the helpme-codesys.com docs and the local SP22 stub Stubs/scriptengine/ScriptLibManObject.pyi.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
     },
@@ -1250,8 +1250,16 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           source?: string;
         };
         type Container = { container_name: string; libman_name: string; references: LibRef[] };
-        const parsed: { project?: string; containers: Container[]; total_references: number } =
-          JSON.parse(jsonStr);
+        type ProjectInfo = { version?: string | null; title?: string | null; company?: string | null; author?: string | null };
+        type Device = { path: string; name?: string; device_id_type?: string; device_id_id?: string; device_id_version?: string };
+        const parsed: {
+          project?: string;
+          project_info?: ProjectInfo;
+          ide_version?: string;
+          devices?: Device[];
+          containers: Container[];
+          total_references: number;
+        } = JSON.parse(jsonStr);
 
         if (!parsed.containers || parsed.containers.length === 0) {
           return {
@@ -1301,10 +1309,38 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           sections.push(`${header}\n${lines.join('\n')}`);
         }
 
+        // Header section: project version (from Project Information),
+        // CODESYS Development System version (from IronPython sys.version
+        // inside CODESYS), and every device's offline target id triple.
+        const headerLines: string[] = [];
+        const pi = parsed.project_info ?? {};
+        if (pi.version || pi.title || pi.company) {
+          headerLines.push('Project info:');
+          if (pi.version) headerLines.push(`  Version: ${pi.version}`);
+          if (pi.title) headerLines.push(`  Title:   ${pi.title}`);
+          if (pi.company) headerLines.push(`  Company: ${pi.company}`);
+          if (pi.author) headerLines.push(`  Author:  ${pi.author}`);
+        }
+        if (parsed.ide_version) {
+          headerLines.push(`IDE: ${parsed.ide_version.replace(/\s+/g, ' ').trim()}`);
+        }
+        if (parsed.devices && parsed.devices.length > 0) {
+          headerLines.push(`Devices (${parsed.devices.length}):`);
+          for (const d of parsed.devices) {
+            const idStr = [d.device_id_type, d.device_id_id, d.device_id_version]
+              .filter(Boolean)
+              .join(' / ');
+            headerLines.push(`  ${d.path}${idStr ? '  [' + idStr + ']' : ''}`);
+          }
+        }
+
         const summary =
           `Project: ${parsed.project ?? '?'} — ${parsed.total_references} library reference(s) across ${parsed.containers.length} container(s).`;
+        const blocks: string[] = [summary];
+        if (headerLines.length > 0) blocks.push(headerLines.join('\n'));
+        blocks.push(sections.join('\n\n'));
         return {
-          content: [{ type: 'text' as const, text: `${summary}\n\n${sections.join('\n\n')}` }],
+          content: [{ type: 'text' as const, text: blocks.join('\n\n') }],
           isError: false,
         };
       } catch (e) {

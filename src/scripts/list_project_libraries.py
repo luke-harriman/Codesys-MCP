@@ -78,16 +78,99 @@ def reference_to_dict(ref):
     return entry
 
 
+def collect_project_info(project):
+    """Read the Project Information node (first child of project root):
+    version, title, company, author. Used to surface the project version
+    above the library list in the rendered markdown."""
+    info = {'version': None, 'title': None, 'company': None, 'author': None}
+    try:
+        for child in project.get_children(False):
+            try:
+                if child.get_name() != 'Project Information':
+                    continue
+            except Exception:
+                continue
+            for attr in ('version', 'title', 'company', 'author'):
+                try:
+                    v = getattr(child, attr, None)
+                    if v is None:
+                        continue
+                    s = str(v)
+                    if s and s != 'None':
+                        info[attr] = s
+                except Exception:
+                    pass
+            break
+    except Exception:
+        pass
+    return info
+
+
+def collect_devices(project):
+    """Walk the tree and capture every is_device=True node's get_device_identification()
+    (the offline target id from project settings: type/id/version). Lets the
+    markdown renderer show 'MainPLC target firmware version' alongside the
+    library list."""
+    devices = []
+
+    def walk(node, prefix='', depth=0, max_depth=10):
+        if depth > max_depth:
+            return
+        try:
+            name = node.get_name()
+        except Exception:
+            name = '?'
+        path = (prefix + '/' + name) if prefix else name
+        is_dev = False
+        try:
+            is_dev = bool(node.is_device)
+        except Exception:
+            pass
+        if is_dev:
+            entry = {'path': path, 'name': name}
+            try:
+                ident = node.get_device_identification()
+                for attr in ('type', 'id', 'version'):
+                    v = getattr(ident, attr, None)
+                    if v is not None:
+                        entry['device_id_' + attr] = str(v)
+            except Exception:
+                pass
+            devices.append(entry)
+        try:
+            children = node.get_children(False)
+        except Exception:
+            children = []
+        for c in children:
+            walk(c, path, depth + 1, max_depth)
+
+    try:
+        for child in project.get_children(False):
+            walk(child)
+    except Exception:
+        pass
+    return devices
+
+
 try:
     print("DEBUG: list_project_libraries: Project='%s'" % PROJECT_FILE_PATH)
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
     project_basename = os.path.basename(PROJECT_FILE_PATH)
+
+    project_info = collect_project_info(primary_project)
+    devices = collect_devices(primary_project)
+    ide_version = sys.version  # IronPython under CODESYS reports the IDE
+    print("DEBUG: project_info: %s" % project_info)
+    print("DEBUG: %d device(s) found." % len(devices))
 
     containers = find_libman_containers(primary_project)
     print("DEBUG: %d libman container(s) found in tree." % len(containers))
 
     result = {
         'project': project_basename,
+        'project_info': project_info,
+        'ide_version': ide_version,
+        'devices': devices,
         'containers': [],
         'total_references': 0,
     }
