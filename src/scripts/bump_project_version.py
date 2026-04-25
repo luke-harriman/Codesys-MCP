@@ -80,12 +80,23 @@ try:
 
     before_raw = pi.version
     before_str = str(before_raw) if before_raw is not None else None
-    before_parts = parse_version(before_raw)
-    after_parts = bump(before_parts, LEVEL)
-    after_str = '%d.%d.%d.%d' % after_parts
 
-    print("DEBUG: bump_project_version: level=%s before=%s -> after=%s" % (
-        LEVEL, before_str, after_str))
+    # First-run convention: if no version is set yet, seed at 1.0.0.0 instead
+    # of treating "no version" as 0.0.0.0 + bump (which would give 0.0.0.1
+    # for level=build, awkward for a first canonical version). Most projects
+    # start tracking at 1.0.0.0 when they first turn on versioning, and the
+    # level argument is moot for the seed step.
+    seed_check = parse_version(before_raw)
+    if seed_check == (0, 0, 0, 0) and (before_raw is None or str(before_raw).strip() in ('', '0.0.0.0', 'None')):
+        after_parts = (1, 0, 0, 0)
+        after_str = '1.0.0.0'
+        print("DEBUG: bump_project_version: no prior version -- seeding to 1.0.0.0 (level=%s ignored on first run)" % LEVEL)
+    else:
+        before_parts = seed_check
+        after_parts = bump(before_parts, LEVEL)
+        after_str = '%d.%d.%d.%d' % after_parts
+        print("DEBUG: bump_project_version: level=%s before=%s -> after=%s" % (
+            LEVEL, before_str, after_str))
 
     pi.version = after_str
 
