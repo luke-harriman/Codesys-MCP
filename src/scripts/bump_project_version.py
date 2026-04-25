@@ -1,4 +1,4 @@
-import sys, scriptengine as script_engine, traceback
+import sys, scriptengine as script_engine, traceback, re
 
 # Bumps one part of the 4-part Project Information.version field of the
 # primary project. Convention (per CODESYS / 3S / WAGO library practice):
@@ -56,6 +56,42 @@ def parse_version(v):
     while len(nums) < 4:
         nums.append(0)
     return tuple(nums)
+
+
+def read_version_from_gvl(primary_project):
+    """When Project Information is missing, read the current version back
+    from the runtime anchor GVL (_MCP_PROJECT_VERSION.sVersion) so subsequent
+    bumps can resume from the actual current state instead of re-seeding to
+    1.0.0.0 on every call. Returns the version string or None if the GVL
+    doesn't exist yet (true first-run)."""
+    try:
+        app = getattr(primary_project, 'active_application', None)
+    except Exception:
+        app = None
+    if app is None:
+        try:
+            apps = primary_project.find('Application', True)
+            if apps:
+                app = apps[0]
+        except Exception:
+            pass
+    if app is None:
+        return None
+    try:
+        for child in app.get_children(False):
+            try:
+                if child.get_name() != VERSION_GVL_NAME:
+                    continue
+                decl = child.textual_declaration.text or ''
+                m = re.search(r"sVersion\s*:\s*STRING\s*:=\s*'(\d+\.\d+\.\d+\.\d+)'", decl)
+                if m:
+                    return m.group(1)
+                return None
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
 
 
 def maintain_version_gvl(primary_project, version_str):
@@ -179,7 +215,11 @@ try:
               "maintained. To add the Project Information node, open the "
               "Project menu -> Project Information in the IDE; subsequent bumps "
               "will then update both metadata and GVL.")
-        before_raw = None
+        # Fall back to reading the existing GVL so we resume from the actual
+        # current version instead of re-seeding to 1.0.0.0 every call.
+        before_raw = read_version_from_gvl(primary_project)
+        if before_raw:
+            print("DEBUG: Project Information missing, resuming from GVL: %s" % before_raw)
     else:
         before_raw = pi.version
     before_str = str(before_raw) if before_raw is not None else None
