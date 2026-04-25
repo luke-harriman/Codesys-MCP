@@ -21,6 +21,19 @@ LEVEL = "{LEVEL}"  # major | minor | revision | build
 
 VALID_LEVELS = ('major', 'minor', 'revision', 'build')
 
+# Standard runtime-readable version anchor. Lives as a constant in a GVL
+# under Application so any IEC code can read it as
+# _MCP_PROJECT_VERSION.sVersion, and a future read_running_version_online
+# tool can pull it via online connect + read_variable. Kept as
+# qualified_only so it can't accidentally shadow a same-named local.
+VERSION_GVL_NAME = '_MCP_PROJECT_VERSION'
+VERSION_GVL_DECLARATION_TEMPLATE = (
+    "{attribute 'qualified_only'}\n"
+    "VAR_GLOBAL CONSTANT\n"
+    "    sVersion : STRING := '%s';\n"
+    "END_VAR\n"
+)
+
 
 def parse_version(v):
     """Parse a version-like value into a 4-tuple of ints, defaulting missing
@@ -43,6 +56,69 @@ def parse_version(v):
     while len(nums) < 4:
         nums.append(0)
     return tuple(nums)
+
+
+def maintain_version_gvl(primary_project, version_str):
+    """Find or create the _MCP_PROJECT_VERSION GVL under the active
+    Application, and set its declaration so the running PLC carries the
+    project version as a constant string. Soft-fails on any error -- the
+    primary outcome of the bump (Project Information.Version) has already
+    succeeded by the time this is called, so a GVL creation failure is
+    logged as a WARNING but does not fail the whole tool."""
+    try:
+        app = getattr(primary_project, 'active_application', None)
+    except Exception:
+        app = None
+    if app is None:
+        try:
+            apps = primary_project.find('Application', True)
+            if apps:
+                app = apps[0]
+        except Exception:
+            pass
+    if app is None:
+        print("WARNING: no active Application found -- cannot maintain %s GVL" % VERSION_GVL_NAME)
+        return False
+
+    decl = VERSION_GVL_DECLARATION_TEMPLATE % version_str
+
+    # Try to find existing GVL with this name
+    existing = None
+    try:
+        for child in app.get_children(False):
+            try:
+                if child.get_name() == VERSION_GVL_NAME:
+                    existing = child
+                    break
+            except Exception:
+                pass
+    except Exception as e:
+        print("WARNING: walking Application children failed: %s" % e)
+
+    if existing is not None:
+        try:
+            existing.textual_declaration.replace(decl)
+            print("DEBUG: updated %s -> sVersion := '%s'" % (VERSION_GVL_NAME, version_str))
+            return True
+        except Exception as e:
+            print("WARNING: failed to update existing %s declaration: %s" % (VERSION_GVL_NAME, e))
+            return False
+
+    # Create it
+    if not hasattr(app, 'create_gvl'):
+        print("WARNING: Application object doesn't expose create_gvl -- cannot create %s" % VERSION_GVL_NAME)
+        return False
+    try:
+        new_gvl = app.create_gvl(name=VERSION_GVL_NAME)
+        if new_gvl is None:
+            print("WARNING: create_gvl returned None for %s" % VERSION_GVL_NAME)
+            return False
+        new_gvl.textual_declaration.replace(decl)
+        print("DEBUG: created %s with sVersion := '%s'" % (VERSION_GVL_NAME, version_str))
+        return True
+    except Exception as e:
+        print("WARNING: failed to create %s: %s" % (VERSION_GVL_NAME, e))
+        return False
 
 
 def bump(parts, level):
@@ -100,6 +176,11 @@ try:
 
     pi.version = after_str
 
+    # Maintain the runtime-readable version anchor (_MCP_PROJECT_VERSION GVL)
+    # so the running PLC carries the same string. Soft-fails so the primary
+    # bump still reports success even if GVL creation hits an edge case.
+    gvl_ok = maintain_version_gvl(primary_project, after_str)
+
     try:
         primary_project.save()
         print("DEBUG: project.save() succeeded after version bump.")
@@ -107,6 +188,10 @@ try:
         print("WARNING: project.save() raised %s -- bump applied in memory but may not persist across IDE close." % save_e)
 
     print("Project Information.Version: %s -> %s" % (before_str, after_str))
+    if gvl_ok:
+        print("Runtime anchor: %s.sVersion := '%s'" % (VERSION_GVL_NAME, after_str))
+    else:
+        print("Runtime anchor: %s NOT updated (see WARNING above)" % VERSION_GVL_NAME)
     print("SCRIPT_SUCCESS: bump_project_version complete.")
     sys.exit(0)
 except Exception as e:
