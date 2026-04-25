@@ -855,17 +855,25 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'connect_to_device',
-    'Connects (logs in) to the PLC runtime for the active application. Requires a configured device/gateway in the project.',
+    'Connects (logs in) to the PLC runtime for the active application. Requires a configured device/gateway in the project. The first connect to a password-protected runtime pops a credential dialog in CODESYS that the user must fill in -- the loginWaitSeconds parameter controls how long the script polls for state stabilisation while that dialog is up.',
     {
       projectFilePath: z.string().describe("Path to the project file."),
+      loginWaitSeconds: z.number().int().min(0).max(600).optional().describe("Seconds to wait for the application state to stabilise after login() returns. Used to give the user time to fill in a credential dialog. Default: 60. Range 0-600."),
     },
-    async (args: { projectFilePath: string }) => {
+    async (args: { projectFilePath: string; loginWaitSeconds?: number }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const waitSec = args.loginWaitSeconds ?? 60;
       const script = scriptManager.prepareScriptWithHelpers(
-        'connect_to_device', { PROJECT_FILE_PATH: escaped },
+        'connect_to_device',
+        {
+          PROJECT_FILE_PATH: escaped,
+          LOGIN_WAIT_SECONDS: String(waitSec),
+        },
         ['ensure_project_open', 'ensure_online_connection']
       );
-      const result = await executor.executeScript(script, 60_000);
+      // Tool-side timeout = wait window + 30s headroom for actual login work
+      const ipcTimeoutMs = (waitSec + 30) * 1000;
+      const result = await executor.executeScript(script, ipcTimeoutMs);
       return formatToolResponse(result, `Connected to device for ${args.projectFilePath}.`);
     }
   );

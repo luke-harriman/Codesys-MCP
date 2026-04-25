@@ -1,7 +1,10 @@
 import sys, scriptengine as script_engine, os, traceback
 
+LOGIN_WAIT_SECONDS = {LOGIN_WAIT_SECONDS}
+
 try:
-    print("DEBUG: connect_to_device script: Project='%s'" % PROJECT_FILE_PATH)
+    print("DEBUG: connect_to_device script: Project='%s', LoginWaitSec=%d" % (
+        PROJECT_FILE_PATH, LOGIN_WAIT_SECONDS))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
 
     online_app, target_app = ensure_online_connection(primary_project)
@@ -65,13 +68,28 @@ try:
 
     if not logged_in:
         raise RuntimeError("All login() call shapes failed. Last error: %s" % last_err)
-    print("DEBUG: Login successful.")
+    print("DEBUG: login() returned. Waiting up to %d seconds for state to stabilise" % LOGIN_WAIT_SECONDS)
+    print("DEBUG: (CODESYS may pop a credential dialog -- enter device password if prompted.)")
 
-    # Check connection state
-    state = "connected"
-    if hasattr(online_app, 'application_state'):
+    # Poll application_state. CODESYS shows a modal credential dialog the
+    # first time you log into a device with a password; login() may return
+    # immediately while the dialog is still up, leaving the application in
+    # an undefined state. Pump the message loop via system.delay() so the
+    # dialog renders and the user has time to fill it in. Exit early once
+    # the state lands on a recognisable terminal value.
+    STABLE_STATES = ('run', 'stop', 'connected', 'halt', 'breakpoint')
+    state = "unknown"
+    for elapsed in range(LOGIN_WAIT_SECONDS):
+        if hasattr(online_app, 'application_state'):
+            try:
+                state = str(online_app.application_state)
+            except Exception:
+                pass
+        if state.lower() in STABLE_STATES:
+            print("DEBUG: state stabilised at '%s' after %ds" % (state, elapsed))
+            break
         try:
-            state = str(online_app.application_state)
+            script_engine.system.delay(1000)
         except Exception:
             pass
 
