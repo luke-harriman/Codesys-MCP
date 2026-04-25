@@ -1202,7 +1202,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'list_project_libraries',
-    'Lists all libraries currently referenced in the CODESYS project.',
+    "Lists every library referenced anywhere in the CODESYS project: walks the project tree, finds every ScriptLibManObjectContainer (the project itself + each Application), gets the Library Manager via container.get_library_manager(), and enumerates lm.references for structured per-reference info (name, namespace, system/placeholder/managed flags, effective resolution). Output is grouped by container so you can see which Application owns which libraries. Per the helpme-codesys.com docs and the local SP22 stub Stubs/scriptengine/ScriptLibManObject.pyi.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
     },
@@ -1233,29 +1233,88 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
       try {
         const jsonStr = result.output.substring(startIdx + libStartMarker.length, endIdx).trim();
-        const libraries: Array<{ name: string; version?: string; company?: string }> = JSON.parse(jsonStr);
+        type LibRef = {
+          id?: string;
+          name?: string;
+          namespace?: string;
+          is_placeholder?: boolean;
+          is_managed?: boolean;
+          system_library?: boolean;
+          qualified_only?: boolean;
+          optional?: boolean;
+          placeholder_name?: string;
+          effective_resolution?: string;
+          default_resolution?: string;
+          is_redirected?: boolean;
+          resolution_info?: string;
+          source?: string;
+        };
+        type Container = { container_name: string; libman_name: string; references: LibRef[] };
+        const parsed: { project?: string; containers: Container[]; total_references: number } =
+          JSON.parse(jsonStr);
 
-        if (libraries.length === 0) {
+        if (!parsed.containers || parsed.containers.length === 0) {
           return {
-            content: [{ type: 'text' as const, text: 'No libraries found in the project (or Library Manager not found).' }],
+            content: [
+              {
+                type: 'text' as const,
+                text:
+                  'No library managers found in the project tree. ' +
+                  'Either the project really has none, or the libman discovery failed -- ' +
+                  'check the script DEBUG output for a tree dump.',
+              },
+            ],
             isError: false,
           };
         }
 
-        const lines = libraries.map((lib) => {
-          let line = `- ${lib.name}`;
-          if (lib.version) line += ` (v${lib.version})`;
-          if (lib.company) line += ` [${lib.company}]`;
-          return line;
-        });
+        if (parsed.total_references === 0) {
+          const containerNames = parsed.containers.map((c) => c.container_name).join(', ');
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Found ${parsed.containers.length} library manager(s) (${containerNames}) but 0 library references in any of them.`,
+              },
+            ],
+            isError: false,
+          };
+        }
 
+        // Group output by container so the user can see which Application
+        // owns which libraries.
+        const sections: string[] = [];
+        for (const c of parsed.containers) {
+          const header = `${c.container_name} (libman: ${c.libman_name}) — ${c.references.length} reference(s)`;
+          const lines = c.references.map((ref) => {
+            const flags: string[] = [];
+            if (ref.system_library) flags.push('system');
+            if (ref.is_placeholder) flags.push('placeholder');
+            if (ref.is_managed) flags.push('managed');
+            if (ref.optional) flags.push('optional');
+            if (ref.is_redirected) flags.push('redirected');
+            const flagStr = flags.length > 0 ? ` [${flags.join(', ')}]` : '';
+            const ns = ref.namespace ? ` ns=${ref.namespace}` : '';
+            const eff = ref.effective_resolution ? ` -> ${ref.effective_resolution}` : '';
+            return `  - ${ref.name ?? '?'}${flagStr}${ns}${eff}`;
+          });
+          sections.push(`${header}\n${lines.join('\n')}`);
+        }
+
+        const summary =
+          `Project: ${parsed.project ?? '?'} — ${parsed.total_references} library reference(s) across ${parsed.containers.length} container(s).`;
         return {
-          content: [{ type: 'text' as const, text: `${libraries.length} library/libraries:\n${lines.join('\n')}` }],
+          content: [{ type: 'text' as const, text: `${summary}\n\n${sections.join('\n\n')}` }],
           isError: false,
         };
-      } catch {
+      } catch (e) {
         return {
-          content: [{ type: 'text' as const, text: 'Failed to parse libraries JSON.' }],
+          content: [
+            {
+              type: 'text' as const,
+              text: `Failed to parse libraries JSON: ${e instanceof Error ? e.message : String(e)}`,
+            },
+          ],
           isError: true,
         };
       }
