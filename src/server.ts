@@ -1553,6 +1553,30 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  s.tool(
+    'read_running_version_online',
+    "Reads the running project's version from a connected PLC over the CODESYS online protocol (port 11740 / gateway). Returns the value of `_MCP_PROJECT_VERSION.sVersion` -- the runtime anchor that bump_project_version maintains automatically. Use this to confirm what version the live PLC is actually running, independently of whatever's in the .project file or the mcp-mirror/. Provides actionable error messages when the GVL is missing (project never bumped) or the boot application is stale (downloaded before the last bump). Implementation: ensure_project_open + ensure_online_connection + read_value('_MCP_PROJECT_VERSION.sVersion').",
+    {
+      projectFilePath: z.string().describe("Path to the project file. The tool opens it if not already primary, connects to its configured device, and reads the version anchor."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'read_running_version_online',
+        { PROJECT_FILE_PATH: escaped },
+        ['ensure_project_open', 'ensure_online_connection']
+      );
+      const result = await executor.executeScript(script);
+      // Pull the version out of the script's RUNNING_VERSION line
+      const match = /RUNNING_VERSION: (\S+)/.exec(result.output || '');
+      const version = match ? match[1] : '?';
+      return formatToolResponse(
+        result,
+        `Running version on PLC: ${version}\n(read from _MCP_PROJECT_VERSION.sVersion via CODESYS online protocol)`
+      );
+    }
+  );
+
   // ─── Filesystem mirror (Phase 1: read-only export) ────────────────────
 
   s.tool(
