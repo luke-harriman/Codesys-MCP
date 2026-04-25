@@ -1115,6 +1115,65 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  s.tool(
+    'git_remote_add',
+    "Adds a named git remote to the project's repository via project.git.remote_add(name, url). One-shot. Pair with git_push afterwards. Requires the project to already be bound to a git repo (run git_init first if needed) AND an active CODESYS Professional Developer Edition subscription license -- without the subscription, the tool fails fast with a clear PDE-required message (the runtime 'HasGitLicense' rule gates every project.git.* call).",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      remoteName: z.string().min(1).describe("Remote name. Conventionally 'origin' for the primary upstream."),
+      remoteUrl: z.string().min(1).describe("Remote URL. HTTPS recommended (e.g. https://gitlab.usv.no/<user>/<repo>.git); SSH also accepted if the CODESYS process has key access."),
+    },
+    async (args: { projectFilePath: string; remoteName: string; remoteUrl: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'git_remote_add',
+        {
+          PROJECT_FILE_PATH: escaped,
+          REMOTE_NAME: args.remoteName,
+          REMOTE_URL: args.remoteUrl,
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, `git_remote_add complete for ${args.projectFilePath}.`);
+    }
+  );
+
+  s.tool(
+    'git_push',
+    "Pushes the local branch to a configured remote via project.git.push(). If username + token are both provided, uses the 3-arg overload push(branch, user, SecureString(token)) and derives the current branch when branchName is omitted; otherwise calls push(branch) or push() and relies on git config / Windows Credential Manager / cached credentials. SECURITY NOTE: when token is supplied, it is templated into the IronPython script that the watcher executes -- briefly resident in the watcher's command file on disk. Prefer cached credentials (omit token) when feasible. Requires an existing git binding on the project, a configured remote (use git_remote_add), and an active CODESYS Professional Developer Edition subscription license -- without the subscription, the tool fails fast with a clear PDE-required message.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      branchName: z.string().optional().describe("Branch to push. Optional; derived from the current branch when token is supplied, or left to push()'s default upstream resolution otherwise."),
+      username: z.string().optional().describe("Optional HTTPS username. For GitLab personal access tokens any non-empty username works (commonly 'oauth2' or the GitLab username). Pair with token."),
+      token: z.string().optional().describe("Optional HTTPS password / personal access token. Sensitive -- prefer cached credentials when possible. If supplied, converted to System.Security.SecureString before being handed to project.git.push."),
+    },
+    async (args: { projectFilePath: string; branchName?: string; username?: string; token?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      // The script wraps these values inside double-quoted Python strings,
+      // so we need to neutralise backslashes and double-quotes. Newlines
+      // would also break the string -- reject them up front rather than
+      // attempting to escape, since legitimate auth values never contain them.
+      const sanitiseForPyDouble = (s: string | undefined, label: string): string => {
+        const v = s || '';
+        if (/\r|\n/.test(v)) throw new Error(`${label} must not contain newlines`);
+        return v.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      };
+      const script = scriptManager.prepareScriptWithHelpers(
+        'git_push',
+        {
+          PROJECT_FILE_PATH: escaped,
+          BRANCH_NAME: sanitiseForPyDouble(args.branchName, 'branchName'),
+          USERNAME: sanitiseForPyDouble(args.username, 'username'),
+          TOKEN: sanitiseForPyDouble(args.token, 'token'),
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, `git_push complete for ${args.projectFilePath}.`);
+    }
+  );
+
   // ─── Library Management Tools ─────────────────────────────────────────
 
   s.tool(
