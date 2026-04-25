@@ -396,6 +396,19 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           isError: true,
         };
       }
+      // Block on IEC reserved identifiers in declarationCode BEFORE
+      // touching the project. Better to refuse than to half-set then
+      // surface a soft warning the caller might miss.
+      const reservedWarnings = findReservedIecIdentifiers(args.declarationCode);
+      if (reservedWarnings.length > 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Refused: declarationCode contains IEC reserved identifier(s). Project NOT modified. Fix and retry.\n\n  - ${reservedWarnings.join('\n  - ')}`,
+          }],
+          isError: true,
+        };
+      }
       const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
       const sanPouPath = sanitizePouPath(args.pouPath);
       // Escape for triple-quoted Python strings
@@ -412,12 +425,10 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         ['ensure_project_open', 'find_object_by_path']
       );
       const result = await executor.executeScript(script);
-      const reservedWarnings = findReservedIecIdentifiers(args.declarationCode);
-      const baseSuccessMsg = `Code set for '${sanPouPath}' in ${args.projectFilePath}. Project saved.`;
-      const successMsg = reservedWarnings.length > 0
-        ? `${baseSuccessMsg}\n\nWARNING (IEC reserved identifiers detected -- code was set, but compile may flag these):\n  - ${reservedWarnings.join('\n  - ')}`
-        : baseSuccessMsg;
-      return formatToolResponse(result, successMsg);
+      return formatToolResponse(
+        result,
+        `Code set for '${sanPouPath}' in ${args.projectFilePath}. Project saved.`
+      );
     }
   );
 
@@ -658,6 +669,18 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       declarationCode: z.string().optional().describe("Optional initial declaration code for the GVL (VAR_GLOBAL...END_VAR)."),
     },
     async (args: { projectFilePath: string; name: string; parentPath: string; declarationCode?: string }) => {
+      // Block on IEC reserved identifiers in declarationCode BEFORE
+      // creating the GVL. Refuse rather than create a broken GVL.
+      const reservedWarnings = findReservedIecIdentifiers(args.declarationCode);
+      if (reservedWarnings.length > 0) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Refused: declarationCode contains IEC reserved identifier(s). GVL NOT created. Fix and retry.\n\n  - ${reservedWarnings.join('\n  - ')}`,
+          }],
+          isError: true,
+        };
+      }
       const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
       const sanParentPath = sanitizePouPath(args.parentPath);
       const sanDecl = (args.declarationCode ?? '').replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
@@ -672,12 +695,10 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         ['ensure_project_open', 'find_object_by_path']
       );
       const result = await executor.executeScript(script);
-      const reservedWarnings = findReservedIecIdentifiers(args.declarationCode);
-      const baseSuccessMsg = `GVL '${args.name}' created in '${sanParentPath}' of ${args.projectFilePath}. Project saved.`;
-      const successMsg = reservedWarnings.length > 0
-        ? `${baseSuccessMsg}\n\nWARNING (IEC reserved identifiers detected -- GVL was created, but compile may flag these):\n  - ${reservedWarnings.join('\n  - ')}`
-        : baseSuccessMsg;
-      return formatToolResponse(result, successMsg);
+      return formatToolResponse(
+        result,
+        `GVL '${args.name}' created in '${sanParentPath}' of ${args.projectFilePath}. Project saved.`
+      );
     }
   );
 
