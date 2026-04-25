@@ -25,7 +25,7 @@ IPC_BASE_DIR = r"{IPC_BASE_DIR}"
 COMMANDS_DIR = os.path.join(IPC_BASE_DIR, "commands")
 RESULTS_DIR = os.path.join(IPC_BASE_DIR, "results")
 POLL_INTERVAL = 50  # milliseconds
-WATCHER_VERSION = "0.4.0"
+WATCHER_VERSION = "0.4.1"
 
 # --- Error capture file (written before anything else can fail) ---
 _ERROR_FILE = os.path.join(IPC_BASE_DIR, "watcher_error.txt")
@@ -142,6 +142,12 @@ try:
             elif isinstance(exit_code, str):
                 success = False
                 error = exit_code
+        except KeyboardInterrupt:
+            # User pressed "Cancel this operation" in CODESYS during this command.
+            # Abort just this command; the watcher loop continues.
+            output = capture.getvalue()
+            error = "Aborted by user (Cancel pressed in CODESYS)"
+            success = False
         except Exception as e:
             output = capture.getvalue()
             error = "%s: %s\n%s" % (type(e).__name__, str(e), traceback.format_exc())
@@ -211,6 +217,19 @@ try:
     print("[WATCHER] Python version: %s" % sys.version)
     _log("Watcher main loop entered")
 
+    def _safe_delay(ms):
+        """Yield via system.delay() but swallow KeyboardInterrupt.
+
+        CODESYS injects KeyboardInterrupt into the script when the user
+        clicks "Click here to CANCEL this operation" in the IDE. The
+        watcher should keep running across that — only an explicit
+        terminate.signal or process kill should stop it.
+        """
+        try:
+            se.system.delay(ms)
+        except KeyboardInterrupt:
+            _log("KeyboardInterrupt during system.delay() — ignored, watcher continues")
+
     while True:
         try:
             if _terminate_requested():
@@ -224,14 +243,22 @@ try:
             ])
             if cmd_files:
                 process_command(cmd_files[0])
+        except KeyboardInterrupt:
+            _log("KeyboardInterrupt during loop iteration — ignored, watcher continues")
         except Exception as e:
             _log("Loop error: %s\n%s" % (e, traceback.format_exc()))
 
         # Yield: serves the message loop so the UI stays interactive.
-        se.system.delay(POLL_INTERVAL)
+        _safe_delay(POLL_INTERVAL)
 
     _log("Watcher main loop exited")
 
+except KeyboardInterrupt:
+    # Last-resort: a Cancel that fires before the loop is even reached
+    # (e.g. during scriptengine import or directory setup) should still
+    # exit quietly without the CODESYS exception dialog.
+    _write_error("KeyboardInterrupt outside main loop — exiting quietly")
+    print("[WATCHER] Cancelled by user before main loop; exiting.")
 except Exception as _fatal:
     _write_error("FATAL: %s\n%s" % (_fatal, traceback.format_exc()))
     print("[WATCHER] FATAL ERROR: %s" % _fatal)
