@@ -1,4 +1,4 @@
-import sys, scriptengine as script_engine, os, traceback, time, codecs
+import sys, scriptengine as script_engine, os, traceback, codecs
 
 # Mirrors the CODESYS project tree into a filesystem layout under MIRROR_ROOT
 # so the project becomes browseable / diffable / AI-editable as plain text.
@@ -101,7 +101,14 @@ def write_one(parent_dir, name, decl, impl, project_path):
     lines = []
     lines.append(u'(* === CODESYS export -- %s === *)' % kind)
     lines.append(u'(* Project path: %s *)' % project_path)
-    lines.append(u'(* Generated:    %s *)' % time.strftime('%Y-%m-%d %H:%M:%S'))
+    # NOTE: deliberately NO 'Generated: <timestamp>' line. Including a
+    # wall-clock time in the file content meant every mirror_export run
+    # produced byte-different output even when the underlying CODESYS code
+    # was unchanged -- which broke the auto-classifier in
+    # release_project_version (it diffed mcp-mirror/ against the latest v*
+    # tag and saw every file as M, triggering phantom releases).
+    # The git commit history is the source of truth for when each file
+    # changed; the in-file timestamp was redundant.
     lines.append(u'')
     if decl:
         lines.append(decl.rstrip())
