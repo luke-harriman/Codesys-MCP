@@ -1048,7 +1048,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'git_status',
-    "Reports the project's git status: current branch, plus a probe of any status/changes/diff methods exposed on project.git. Read-only. Requires the CODESYS Git plug-in and a project bound to a git working tree (use git_init if not). Diagnostic dump of project.git surface is included.",
+    "Reports the project's git status: current branch, plus a probe of any status/changes/diff methods exposed on project.git. Read-only. Requires the CODESYS Git plug-in (ships with CODESYS) AND an active CODESYS Professional Developer Edition subscription license -- without the subscription, every project.git.* operation is gated by the runtime 'HasGitLicense' rule and the tool fails fast with a clear PDE-required message. Also requires the project to be bound to a git working tree (use git_init if not). Diagnostic dump of project.git surface is included.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
     },
@@ -1066,7 +1066,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'git_init',
-    "Initialises a Git repository for the project's directory (or a custom path) via project.git.init(). One-shot setup; use git_status afterwards to confirm. Requires CODESYS Git plug-in.",
+    "Initialises a Git repository for the project's directory (or a custom path) via project.git.init(). One-shot setup; use git_status afterwards to confirm. Requires the CODESYS Git plug-in AND an active CODESYS Professional Developer Edition subscription license -- without the subscription, the tool fails fast with a clear PDE-required message (the runtime 'HasGitLicense' rule gates every project.git.* call).",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       localRepoPath: z.string().optional().describe("Filesystem path to initialise the repo at. Defaults to the project file's parent directory."),
@@ -1089,7 +1089,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'git_commit',
-    "Stages all working-tree changes and commits them via project.git.commit_complete(message, user, mail). Requires the project to already be bound to a git repo (use git_init first if needed).",
+    "Stages all working-tree changes and commits them via project.git.commit_complete(message, user, mail). Requires the project to already be bound to a git repo (use git_init first if needed) AND an active CODESYS Professional Developer Edition subscription license -- without the subscription, the tool fails fast with a clear PDE-required message (the runtime 'HasGitLicense' rule gates every project.git.* call).",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       message: z.string().min(1).describe("Commit message. Multiline OK."),

@@ -21,6 +21,19 @@ try:
             "to initialise one, or open a project that is already in a "
             "working tree." % PROJECT_FILE_PATH)
 
+    # Early license probe -- has_working_tree is a cheap, license-gated query
+    # per the SP22 stubs (Stubs/scriptengine/GitScriptProject.pyi). Letting a
+    # HasGitLicense failure escape here routes through the outer except, which
+    # rewrites it into a clear "PDE subscription needed" message instead of
+    # being swallowed by the per-method probe loop below.
+    if hasattr(git, 'has_working_tree'):
+        try:
+            git.has_working_tree()
+        except Exception as probe_e:
+            if 'HasGitLicense' in str(probe_e):
+                raise
+            print("DEBUG: license probe (has_working_tree) raised non-license error: %s" % probe_e)
+
     git_attrs = sorted([a for a in dir(git) if not a.startswith('_')])
     print("DEBUG: project.git attributes: %s" % git_attrs)
 
@@ -63,8 +76,21 @@ try:
     sys.exit(0)
 except Exception as e:
     detailed = traceback.format_exc()
-    msg = "Error in git_status for project '%s': %s\n%s" % (
-        PROJECT_FILE_PATH, e, detailed)
+    raw = "%s" % e
+    if 'HasGitLicense' in raw or 'HasGitLicense' in detailed:
+        msg = (
+            "CODESYS Git scripting requires an active CODESYS Professional "
+            "Developer Edition subscription license. The plug-in is installed "
+            "but the runtime 'HasGitLicense' rule returned False, so every "
+            "project.git.* operation (init/commit/status/...) is gated. "
+            "Activate a Professional Developer Edition subscription on this "
+            "CODESYS install (see https://store.codesys.com/en/codesys-git.html, "
+            "sections 'Additional Requirements' and 'Licensing'). Underlying "
+            "error from CODESYS: %s" % e
+        )
+    else:
+        msg = "Error in git_status for project '%s': %s\n%s" % (
+            PROJECT_FILE_PATH, e, detailed)
     print(msg)
     print("SCRIPT_ERROR: %s" % msg)
     sys.exit(1)
