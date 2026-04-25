@@ -1350,7 +1350,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'mirror_export',
-    "Walks the CODESYS project tree and writes one .iecst file per code-bearing object into a filesystem mirror, preserving the project tree as nested directories. Programs / Function Blocks / Functions / Methods / Properties / DUTs / GVLs / Interfaces all become text files; structural nodes (Devices, Applications, Folders) become directories. Each file carries a header comment with its original CODESYS project path so a future write-back tool can map it back to set_pou_code's pouPath. Read-only -- does NOT modify the CODESYS project. UTF-8 output. If mirrorRoot is omitted, defaults to '<projectDir>/MCP/mirror'.",
+    "Walks the CODESYS project tree and writes one .st file per code-bearing object into a filesystem mirror, preserving the project tree as nested directories. Programs / Function Blocks / Functions / Methods / Properties / DUTs / GVLs / Interfaces all become text files; structural nodes (Devices, Applications, Folders) become directories. Each file carries a header comment with its original CODESYS project path so a future write-back tool can map it back to set_pou_code's pouPath. Read-only -- does NOT modify the CODESYS project. UTF-8 output. If mirrorRoot is omitted, defaults to '<projectDir>/MCP/mirror'.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       mirrorRoot: z.string().optional().describe("Filesystem path where the mirror tree gets written. If omitted, defaults to '<projectDir>/MCP/mirror'. Created automatically if missing; existing files at the same paths are overwritten."),

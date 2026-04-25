@@ -5,7 +5,7 @@ import sys, scriptengine as script_engine, os, traceback, time, codecs
 #
 #  - Structural nodes (Device, Application, Folder, ...) become directories.
 #  - Code-bearing nodes (Program, FB, Function, Method, Property, DUT, GVL,
-#    Interface, ...) become .iecst files in their parent directory.
+#    Interface, ...) become .st files in their parent directory.
 #  - If a code-bearing node has child code objects (e.g. an FB with methods)
 #    those children land in a sibling subdirectory with the parent's name.
 #  - Filesystem-illegal characters in CODESYS object names are replaced with
@@ -95,7 +95,7 @@ def write_one(parent_dir, name, decl, impl, project_path):
     if not os.path.exists(parent_dir):
         os.makedirs(parent_dir)
     kind = classify(decl)
-    fname = sanitise(name) + '.iecst'
+    fname = sanitise(name) + '.st'
     fpath = os.path.join(parent_dir, fname)
 
     lines = []
