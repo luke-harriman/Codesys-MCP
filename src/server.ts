@@ -1346,6 +1346,33 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // ─── Project metadata ────────────────────────────────────────────────
+
+  s.tool(
+    'bump_project_version',
+    "Bumps one part of the 4-part Project Information.Version field of the primary project (Major.Minor.Revision.Build) and saves the project. Convention: major = incompatible API break (rename FB / change public signature / remove method); minor = backward-compatible feature add (new FB / GVL / method); revision = bug fix only; build = internal counter, often 0 for hand-released versions. Bumping a higher part resets all lower parts to 0 (e.g. bumping minor resets revision and build to 0). Treats None / empty / unset version as '0.0.0.0'. The Version is exposed at runtime via the Project Information library's GetVersion() helper, which IEC code can call to surface the running version.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      level: z.enum(['major', 'minor', 'revision', 'build']).describe("Which part of the 4-part version to bump. Major = incompatible API break. Minor = backward-compatible feature add. Revision = bug fix only. Build = internal / CI counter."),
+    },
+    async (args: { projectFilePath: string; level: 'major' | 'minor' | 'revision' | 'build' }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'bump_project_version',
+        {
+          PROJECT_FILE_PATH: escaped,
+          LEVEL: args.level,
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(
+        result,
+        `bump_project_version (${args.level}) complete for ${args.projectFilePath}.`
+      );
+    }
+  );
+
   // ─── Filesystem mirror (Phase 1: read-only export) ────────────────────
 
   s.tool(
