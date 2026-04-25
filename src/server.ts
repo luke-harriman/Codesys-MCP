@@ -1181,6 +1181,33 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   );
 
   s.tool(
+    'set_library_version',
+    "Sets the version of a single library reference in the project's Library Manager. Use for surgical fixes (e.g. unpin StringUtils 3.5.18.0 -> 3.5.20.0) without touching other refs. Use update_all_libraries for bulk changes.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      libraryName: z.string().describe("Library name. Bare name matches case-insensitively (e.g. 'StringUtils'). Use 'Namespace.Name' (e.g. 'System.StringUtils') if the bare name is ambiguous."),
+      targetVersion: z.string().describe("Version to set ('*' for always-newest, otherwise an exact version like '3.5.20.0')."),
+    },
+    async (args: { projectFilePath: string; libraryName: string; targetVersion: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_library_version',
+        {
+          PROJECT_FILE_PATH: escaped,
+          LIBRARY_NAME: args.libraryName.trim(),
+          TARGET_VERSION: args.targetVersion.trim(),
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(
+        result,
+        `Library '${args.libraryName}' set to version '${args.targetVersion}' in ${args.projectFilePath}. Project saved.`
+      );
+    }
+  );
+
+  s.tool(
     'update_all_libraries',
     "Updates every library reference in a project's Library Manager to a target version (default '*' = always-newest installed). By default skips system-pinned references; set includeSystem=true to also rewrite those (risky for device-tied projects). Saves the project on success.",
     {
