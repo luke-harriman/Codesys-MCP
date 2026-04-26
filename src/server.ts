@@ -288,7 +288,26 @@ function classifyMcpMirrorChanges(projectDir: string): ClassifyResult {
     evidence.push(`git diff against ${baseRef} failed -- treating as no-changes`);
     return { kind: 'no-changes', evidence };
   }
-  if (!raw.trim()) {
+
+  // git diff only reports TRACKED changes. New files that mirror_export just
+  // wrote are untracked from git's POV until added, and would otherwise be
+  // invisible to the classifier (they wouldn't trigger a 'minor' bump even
+  // though they're new public symbols). Pull them in via ls-files --others.
+  // Surfaced on MCPTest2 today: adding FB_Position + FB_Random5s via
+  // create_pou caused the classifier to see only 1 modified file (PLC_PRG)
+  // and classify as 'revision' instead of 'minor'. The added FBs were
+  // untracked at classify time.
+  let untracked = '';
+  try {
+    untracked = execSync(
+      `git -C "${projectDir}" ls-files --others --exclude-standard -- mcp-mirror/`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+  } catch {
+    // ls-files failure shouldn't block classification on tracked diff alone
+  }
+
+  if (!raw.trim() && !untracked.trim()) {
     evidence.push('no changes in mcp-mirror/ since baseline');
     return { kind: 'no-changes', evidence };
   }
@@ -314,6 +333,10 @@ function classifyMcpMirrorChanges(projectDir: string): ClassifyResult {
       hasModify = true;
       evidence.push(`modified: ${rest}`);
     }
+  }
+  for (const line of untracked.split('\n').filter((l) => l.trim())) {
+    hasAdd = true;
+    evidence.push(`added (untracked): ${line}`);
   }
 
   if (hasDelete || hasRename) return { kind: 'bump', level: 'major', evidence };
@@ -1835,6 +1858,32 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         return { content: [{ type: 'text' as const, text: 'release_project_version: bump succeeded but new version could not be parsed' }], isError: true };
       }
       log.push(`bump: ${from ?? '(none)'} -> ${newVersion}`);
+
+      // 3b. Re-run mirror_export AFTER the bump. The pre-bump mirror
+      // captured the old _MCP_PROJECT_VERSION.sVersion value and (when
+      // applicable) the old Project Information.Version. After the bump,
+      // those values changed in CODESYS in-memory and got saved to the
+      // .project binary. The mirror needs to reflect the post-bump state
+      // or the next 'release' call will see _MCP_PROJECT_VERSION.st as
+      // a real diff vs the just-tagged release and bump again. Surfaced
+      // on MCPTest2 v1.1.0.0 (commit 8d79193): the binary GVL was
+      // 1.0.2.0 while the docs said 1.1.0.0 because mirror_export
+      // didn't re-run after the bump.
+      try {
+        const mirrorScript2 = scriptManager.prepareScriptWithHelpers(
+          'mirror_export',
+          { PROJECT_FILE_PATH: escaped, MIRROR_ROOT: path.join(projectDir, 'mcp-mirror') },
+          ['ensure_project_open']
+        );
+        const mirror2 = await executor.executeScript(mirrorScript2);
+        if (mirror2.success && mirror2.output.includes('SCRIPT_SUCCESS')) {
+          log.push('mirror_export (post-bump): OK');
+        } else {
+          log.push('mirror_export (post-bump): WARNING -- post-bump mirror may be stale');
+        }
+      } catch (e) {
+        log.push(`mirror_export (post-bump): WARNING -- ${e instanceof Error ? e.message : String(e)}`);
+      }
 
       // 4. Append Changelog (the manual-bump path doesn't auto-append; do it here)
       appendChangelogEntry(projectDir, from, newVersion, levelLabel, classification.evidence);
