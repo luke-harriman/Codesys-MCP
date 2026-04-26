@@ -27,9 +27,15 @@ VALID_LEVELS = ('major', 'minor', 'revision', 'build')
 # tool can pull it via online connect + read_variable. Kept as
 # qualified_only so it can't accidentally shadow a same-named local.
 VERSION_GVL_NAME = '_MCP_PROJECT_VERSION'
+# NOT VAR_GLOBAL CONSTANT: CODESYS inlines CONSTANT scalars at compile time,
+# which strips them from the online symbol table -- read_running_version_online
+# would then fail with 'Invalid expression' on every project bumped via this
+# tool. Plain VAR_GLOBAL keeps the symbol live so the online tool can read
+# the running version. The string is still effectively read-only at runtime
+# (only bump_project_version updates it via textual_declaration.replace).
 VERSION_GVL_DECLARATION_TEMPLATE = (
     "{attribute 'qualified_only'}\n"
-    "VAR_GLOBAL CONSTANT\n"
+    "VAR_GLOBAL\n"
     "    sVersion : STRING := '%s';\n"
     "END_VAR\n"
 )

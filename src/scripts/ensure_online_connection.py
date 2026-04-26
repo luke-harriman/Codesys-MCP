@@ -77,3 +77,125 @@ def ensure_online_connection(primary_project):
 
     return online_app, target_app
 # --- End of ensure_online_connection function ---
+
+
+# --- Function to ensure the online application is logged in ---
+def ensure_logged_in(online_app, login_wait_seconds=30):
+    """Idempotently log into the device. In persistent mode the login state
+    survives across calls and this is a no-op via online_app.is_logged_in.
+    In headless mode each tool call spawns a fresh CODESYS process, so any
+    online tool (start_stop, read_variable, write_variable,
+    read_running_version_online) needs to log in itself before its action.
+
+    Without this helper, tools other than connect_to_device + download_to_device
+    fail in headless mode with 'Application not logged in.' (start/stop) or
+    'Invalid expression' (read/write).
+
+    Mirrors the SP-version-drift login probe in connect_to_device.py:
+    OnlineChangeOption (older) vs LoginMode (SP21+) vs members on the
+    online_app object itself; (mode, force_download_bool) two-arg shape vs
+    (mode,) one-arg shape vs no-arg fallback. Prefers least-invasive
+    'TryOnlineChange' / 'OnlineChangeOnly' semantics."""
+    import scriptengine as _se  # local import; ensure_online_connection.py
+                                # is concatenated into the script body so
+                                # the top-level import in the main script
+                                # is also visible, but keep this defensive.
+    # Short-circuit: already logged in (persistent mode).
+    if hasattr(online_app, 'is_logged_in'):
+        try:
+            if online_app.is_logged_in:
+                print("DEBUG: ensure_logged_in: already logged in (persistent session).")
+                return
+        except Exception as e:
+            print("DEBUG: ensure_logged_in: is_logged_in property raised: %s" % e)
+
+    if not hasattr(online_app, 'login'):
+        raise TypeError("Online application does not support login().")
+
+    # Build enum candidate list -- same logic as connect_to_device.py's
+    # main body, kept here so headless tool calls don't have to
+    # re-implement it. Probe both script_engine.* and online_app.* for
+    # LoginMode / OnlineChangeOption.
+    enum_sources = []
+    for src_name in ('LoginMode', 'OnlineChangeOption'):
+        if hasattr(_se, src_name):
+            try:
+                enum_sources.append((src_name, getattr(_se, src_name)))
+            except Exception:
+                pass
+    for src_name in ('LoginMode', 'OnlineChangeOption'):
+        if hasattr(online_app, src_name):
+            try:
+                enum_sources.append(('online_app.' + src_name, getattr(online_app, src_name)))
+            except Exception:
+                pass
+
+    preferred_order = ('TryOnlineChange', 'OnlineChangeOnly', 'Try', 'OnlineChange',
+                       'WithDownload', 'ForceDownload', 'Download',
+                       'None_', 'None')
+    enum_candidates = []
+    seen_keys = set()
+    for src_name, oc in enum_sources:
+        try:
+            members = sorted([m for m in dir(oc) if not m.startswith('_')])
+        except Exception:
+            members = []
+        for preferred in preferred_order:
+            if preferred in members:
+                key = '%s.%s' % (src_name, preferred)
+                if key not in seen_keys:
+                    try:
+                        enum_candidates.append((key, getattr(oc, preferred)))
+                        seen_keys.add(key)
+                    except Exception:
+                        pass
+        for m in members:
+            key = '%s.%s' % (src_name, m)
+            if key not in seen_keys:
+                try:
+                    enum_candidates.append((key, getattr(oc, m)))
+                    seen_keys.add(key)
+                except Exception:
+                    pass
+
+    call_shapes = []
+    for nm, val in enum_candidates:
+        call_shapes.append(("login(%s, False)" % nm, (val, False)))
+        call_shapes.append(("login(%s, True)" % nm, (val, True)))
+        call_shapes.append(("login(%s)" % nm, (val,)))
+    call_shapes.append(("login(False)", (False,)))
+    call_shapes.append(("login(True)", (True,)))
+    call_shapes.append(("login()", ()))
+
+    last_err = None
+    logged_in = False
+    for desc, args in call_shapes:
+        try:
+            online_app.login(*args)
+            print("DEBUG: ensure_logged_in: %s succeeded" % desc)
+            logged_in = True
+            break
+        except Exception as e:
+            last_err = e
+
+    if not logged_in:
+        raise RuntimeError("ensure_logged_in: all login() call shapes failed. Last error: %s" % last_err)
+
+    # Settle wait. Same STABLE_STATES as connect_to_device.
+    STABLE_STATES = ('run', 'stop', 'connected', 'halt', 'breakpoint')
+    state = "unknown"
+    for elapsed in range(login_wait_seconds):
+        if hasattr(online_app, 'application_state'):
+            try:
+                state = str(online_app.application_state)
+            except Exception:
+                pass
+        if state.lower() in STABLE_STATES:
+            print("DEBUG: ensure_logged_in: state stabilised at '%s' after %ds" % (state, elapsed))
+            return
+        try:
+            _se.system.delay(1000)
+        except Exception:
+            pass
+    print("DEBUG: ensure_logged_in: state did not stabilise within %ds (last='%s'); proceeding anyway." % (login_wait_seconds, state))
+# --- End of ensure_logged_in function ---

@@ -12,6 +12,8 @@ try:
 
     online_app, target_app = ensure_online_connection(primary_project)
     app_name = getattr(target_app, 'get_name', lambda: "Unknown")()
+    # Auto-login -- idempotent in persistent mode, required in headless.
+    ensure_logged_in(online_app)
 
     # SP21+/SP22 uses a two-step prepare-then-write pattern:
     #   1) set_prepared_value(name, value) -- stage the value

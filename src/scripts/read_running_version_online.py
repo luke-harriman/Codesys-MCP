@@ -23,6 +23,8 @@ try:
     online_app, target_app = ensure_online_connection(primary_project)
     app_name = getattr(target_app, 'get_name', lambda: 'Unknown')()
     print("DEBUG: connected to application '%s'" % app_name)
+    # Auto-login -- idempotent in persistent mode, required in headless.
+    ensure_logged_in(online_app)
 
     # Read the version anchor
     raw_value = None
@@ -36,7 +38,24 @@ try:
                     raw_value = result
         except Exception as e:
             msg = str(e)
-            if 'not found' in msg.lower() or 'unknown' in msg.lower() or 'symbol' in msg.lower():
+            msg_l = msg.lower()
+            if 'invalid expression' in msg_l:
+                # Most common cause: the GVL is declared VAR_GLOBAL CONSTANT,
+                # which CODESYS inlines at compile time -- the symbol never
+                # makes it into the online table. This is a known footgun
+                # because older bump_project_version emitted CONSTANT GVLs.
+                raise RuntimeError(
+                    "Online evaluator returned 'Invalid expression' for '%s'. "
+                    "Most likely cause: the _MCP_PROJECT_VERSION GVL was created "
+                    "with VAR_GLOBAL CONSTANT, which CODESYS inlines at compile "
+                    "time so the symbol is not in the online symbol table. "
+                    "Fix: edit _MCP_PROJECT_VERSION's declaration to drop "
+                    "CONSTANT (just VAR_GLOBAL), then bump_project_version + "
+                    "download_to_device. (newer bump_project_version emits "
+                    "non-CONSTANT GVLs by default, so future-bumped projects "
+                    "are unaffected.) Underlying error: %s" % (VARIABLE_PATH, e)
+                )
+            if 'not found' in msg_l or 'unknown' in msg_l or 'symbol' in msg_l:
                 raise RuntimeError(
                     "Variable '%s' not found on the running PLC. "
                     "Either bump_project_version has never been run on this project "

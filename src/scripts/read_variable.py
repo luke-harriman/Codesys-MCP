@@ -9,6 +9,8 @@ try:
 
     online_app, target_app = ensure_online_connection(primary_project)
     app_name = getattr(target_app, 'get_name', lambda: "Unknown")()
+    # Auto-login -- idempotent in persistent mode, required in headless.
+    ensure_logged_in(online_app)
 
     # Read the variable value
     value = None

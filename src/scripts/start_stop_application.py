@@ -13,6 +13,10 @@ try:
 
     online_app, target_app = ensure_online_connection(primary_project)
     app_name = getattr(target_app, 'get_name', lambda: "Unknown")()
+    # In headless mode each MCP call spawns a fresh CODESYS process, so the
+    # login from a prior connect_to_device call is gone. ensure_logged_in
+    # is idempotent in persistent mode (short-circuits via is_logged_in).
+    ensure_logged_in(online_app)
 
     if action_lower == 'start':
         if hasattr(online_app, 'start'):

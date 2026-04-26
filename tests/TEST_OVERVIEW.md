@@ -109,16 +109,24 @@ Status legend: **✅ working** • **⚠ degraded** (works but with known gotcha
 
 These all require a running PLC and a configured device gateway. Persistent timing here is **gateway-bound**, not CODESYS-bound — it's network roundtrips, not script overhead.
 
+**v5 sweep verified end-to-end against local CODESYS Control Win V3** (PLATEA hostname, gateway port 11740) on 2026-04-26. All 8 tools called in sequence against MCPTest2 v1.3.4.0. **7/8 PASS, 1 broken-by-design (root-caused + fixed in this sweep, see notes).** Use **persistent mode** for any device-tool chain — headless spawns a fresh CODESYS process per call which kills the login state established by `connect_to_device`. Auto-login was added to all four scripts that previously relied on persisted login (start_stop_application, read_variable, write_variable, read_running_version_online) so they now also work end-to-end in headless. See "Headless mode + device tools" deep-dive below.
+
 | Tool | Status | What it does | Persistent (with PLC) | Headless |
 |---|---|---|---|---|
-| `connect_to_device` | ✅ (fixed [`2607063`](https://github.com/phobicdotno/Codesys-MCP/commit/2607063), needs PLC to verify) | Logs into the active application via `online_app.login(...)`. Now probes 4 enum source locations (`script_engine.LoginMode`, `script_engine.OnlineChangeOption`, `online_app.LoginMode`, `online_app.OnlineChangeOption`) plus 3-arg call shape variant. | 1–5 s | n/a |
-| `disconnect_from_device` | ✅ (when connected) | `online_app.logout()` | 200–500 ms | n/a (no persistent online context) |
-| `get_application_state` | ✅ | Reads `online_app.application_state` (run/stop/halt/connected/...) | 100–300 ms (when online); 100 ms when offline | 8–14 s |
-| `read_variable` | ✅ (when connected) | `online_app.read_value('var.path')` over the gateway | 100–500 ms per call | n/a |
-| `write_variable` | ✅ (when connected) | `online_app.write_value('var.path', value)` | 100–500 ms | n/a |
-| `download_to_device` | ✅ (when connected) | Pushes the new boot application after a code change. Heavy. | 5–60 s (project size dependent) | n/a |
-| `start_stop_application` | ✅ (when connected) | `online_app.start()` / `.stop()` | 200–500 ms | n/a |
-| `read_running_version_online` | ✅ (when connected) | Reads `_MCP_PROJECT_VERSION.sVersion` from the running PLC | 100–500 ms | n/a |
+| `connect_to_device` | ✅ verified end-to-end (v5 sweep, fixed [`2607063`](https://github.com/phobicdotno/Codesys-MCP/commit/2607063)) | Logs into the active application via `online_app.login(...)`. Probes 4 enum source locations (`script_engine.LoginMode`, `script_engine.OnlineChangeOption`, `online_app.LoginMode`, `online_app.OnlineChangeOption`) plus 3-arg call shape variant. | 1–5 s | runs but login state lost on next call (use auto-login helper) |
+| `disconnect_from_device` | ✅ verified end-to-end (v5: `Logged In: True` → `False` confirmed) | `online_app.logout()` | 200–500 ms | n/a (no persistent online context) |
+| `get_application_state` | ✅ verified end-to-end (v5: returns `run`/`stop` correctly) | Reads `online_app.application_state` and `is_logged_in`. | 100–300 ms (when online); 100 ms when offline | 8–14 s (returns `none, Logged In: False` if not connected) |
+| `read_variable` | ✅ verified end-to-end (v5: `PLC_PRG.watchdog1 = BYTE#225` live, ticking) | `online_app.read_value('var.path')` over the gateway. **CONSTANT VAR_GLOBAL scalars are inlined at compile time and absent from the online symbol table -- expect 'Invalid expression'.** | 100–500 ms per call | now auto-logs-in (v5 fix) |
+| `write_variable` | ✅ verified end-to-end (v5: wrote 200 → read 204 4s later, 1 Hz tick proves write took) | `set_prepared_value` + `write_prepared_values` (SP21+ path), falls back to `write_value` / `set_value` / `write` / `set` for older SPs | 100–500 ms | now auto-logs-in (v5 fix) |
+| `download_to_device` | ✅ verified end-to-end (v5: pushed v1.3.4.0 to PLATEA) | Pushes the new boot application after a code change. Heavy. Has its own login probe (independent from auto-login helper). | 5–60 s (project size dependent) | runs end-to-end |
+| `start_stop_application` | ✅ verified end-to-end (v5: stop → `stop` state, start → `run` state) | `online_app.start()` / `.stop()` | 200–500 ms | now auto-logs-in (v5 fix) |
+| `read_running_version_online` | ⚠ **broken-by-design pre-v5; fixed in this sweep** | Reads `_MCP_PROJECT_VERSION.sVersion` from the running PLC. **Old `bump_project_version` emitted the GVL as `VAR_GLOBAL CONSTANT`, which CODESYS inlines at compile time, so the symbol never reaches the online evaluator -- read returns `Invalid expression`.** Fixed in v5 by dropping `CONSTANT` from `VERSION_GVL_DECLARATION_TEMPLATE`. Existing projects auto-migrate on next bump (the existing-GVL branch overwrites `textual_declaration` with the new template). Script also detects the failure mode and emits a precise actionable error. | 100–500 ms | now auto-logs-in (v5 fix) |
+
+#### Headless mode + device tools (v5 deep-dive)
+
+In **persistent** mode the MCP keeps one CODESYS process alive; `connect_to_device`'s login state survives across calls. In **headless** mode each MCP call spawns a fresh `CODESYS.exe --noUI` process — login state from the prior call is gone before the next call starts. Pre-v5, only `connect_to_device` and `download_to_device` did their own `online_app.login(...)`; the other four (`start_stop_application`, `read_variable`, `write_variable`, `read_running_version_online`) silently failed in headless with `Application not logged in.` (start/stop) or `Invalid expression` (read/write).
+
+**v5 fix:** `ensure_logged_in(online_app, login_wait_seconds=30)` was added to `ensure_online_connection.py` next to the existing `ensure_online_connection`. The four affected scripts now call it immediately after creating the online app. The helper short-circuits via `online_app.is_logged_in` so persistent mode is a no-op (no extra login roundtrip), then runs the same enum-probe + call-shape probe + STABLE_STATES settle-wait pattern that `connect_to_device` and `download_to_device` already use. Net effect: every online tool now works end-to-end in BOTH modes.
 
 ### Git wrappers (6)
 
