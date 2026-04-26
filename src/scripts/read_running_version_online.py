@@ -40,20 +40,37 @@ try:
             msg = str(e)
             msg_l = msg.lower()
             if 'invalid expression' in msg_l:
-                # Most common cause: the GVL is declared VAR_GLOBAL CONSTANT,
-                # which CODESYS inlines at compile time -- the symbol never
-                # makes it into the online table. This is a known footgun
-                # because older bump_project_version emitted CONSTANT GVLs.
+                # Two known causes lead here. Surface both with concrete
+                # next steps; the user usually only hits ONE of them.
                 raise RuntimeError(
-                    "Online evaluator returned 'Invalid expression' for '%s'. "
-                    "Most likely cause: the _MCP_PROJECT_VERSION GVL was created "
-                    "with VAR_GLOBAL CONSTANT, which CODESYS inlines at compile "
-                    "time so the symbol is not in the online symbol table. "
-                    "Fix: edit _MCP_PROJECT_VERSION's declaration to drop "
-                    "CONSTANT (just VAR_GLOBAL), then bump_project_version + "
-                    "download_to_device. (newer bump_project_version emits "
-                    "non-CONSTANT GVLs by default, so future-bumped projects "
-                    "are unaffected.) Underlying error: %s" % (VARIABLE_PATH, e)
+                    "Online evaluator returned 'Invalid expression' for '%s'.\n"
+                    "\n"
+                    "TWO POSSIBLE CAUSES:\n"
+                    "\n"
+                    "(1) Old projects: the _MCP_PROJECT_VERSION GVL was created\n"
+                    "    with VAR_GLOBAL CONSTANT. CODESYS inlines CONSTANT\n"
+                    "    scalars at compile time so the symbol never reaches\n"
+                    "    the online symbol table. Newer bump_project_version\n"
+                    "    emits plain VAR_GLOBAL; existing projects auto-migrate\n"
+                    "    on the next bump (the existing-GVL branch overwrites\n"
+                    "    the declaration with the new template).\n"
+                    "    Fix: run bump_project_version once + download_to_device.\n"
+                    "\n"
+                    "(2) Common case: CODESYS strips unreferenced GVLs from the\n"
+                    "    online symbol table even if they're plain VAR_GLOBAL.\n"
+                    "    By definition no IEC code references the version anchor,\n"
+                    "    so the optimizer drops it. The bump tool does NOT\n"
+                    "    auto-inject a reference (too invasive on user code).\n"
+                    "    Fix: add a one-liner to your main PROGRAM (typically\n"
+                    "    PLC_PRG). Declare a STRING var like\n"
+                    "        sVersionTag : STRING;\n"
+                    "    and assign it at the top of the implementation:\n"
+                    "        sVersionTag := _MCP_PROJECT_VERSION.sVersion;\n"
+                    "    Then download_to_device. The reference forces the\n"
+                    "    symbol into the online table; this tool will then\n"
+                    "    read it successfully.\n"
+                    "\n"
+                    "Underlying error: %s" % (VARIABLE_PATH, e)
                 )
             if 'not found' in msg_l or 'unknown' in msg_l or 'symbol' in msg_l:
                 raise RuntimeError(

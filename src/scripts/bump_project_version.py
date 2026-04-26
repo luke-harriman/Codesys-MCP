@@ -27,12 +27,18 @@ VALID_LEVELS = ('major', 'minor', 'revision', 'build')
 # tool can pull it via online connect + read_variable. Kept as
 # qualified_only so it can't accidentally shadow a same-named local.
 VERSION_GVL_NAME = '_MCP_PROJECT_VERSION'
-# NOT VAR_GLOBAL CONSTANT: CODESYS inlines CONSTANT scalars at compile time,
-# which strips them from the online symbol table -- read_running_version_online
-# would then fail with 'Invalid expression' on every project bumped via this
-# tool. Plain VAR_GLOBAL keeps the symbol live so the online tool can read
-# the running version. The string is still effectively read-only at runtime
-# (only bump_project_version updates it via textual_declaration.replace).
+# Plain VAR_GLOBAL (NOT CONSTANT). CODESYS inlines CONSTANT scalars at
+# compile time and strips them from the online symbol table, which would
+# break read_running_version_online with 'Invalid expression'. Plain
+# VAR_GLOBAL keeps the symbol live without needing extra attributes -- a
+# verified-working test case in MCPTest2 (GVL_Test.bRun) reads fine over
+# the online protocol despite zero IEC references, so a Symbol
+# Configuration / 'symbol' attribute is NOT required for the runtime to
+# expose unreferenced globals. The string is still effectively read-only
+# at runtime since only bump_project_version updates it via
+# textual_declaration.replace.
+# qualified_only attribute kept so callers must use the full qualified
+# name in IEC code (avoids accidental shadowing of a same-named local).
 VERSION_GVL_DECLARATION_TEMPLATE = (
     "{attribute 'qualified_only'}\n"
     "VAR_GLOBAL\n"
