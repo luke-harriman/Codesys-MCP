@@ -29,11 +29,19 @@ Unlike headless-only approaches that spawn a new CODESYS process per command, th
 
 ## Installation
 
+This is a **Node.js MCP server** (npm). There is no `pip install` — the `.py` files you see under `src/scripts/` are CODESYS IronPython templates that get rendered and shipped *inside* the npm package, not a separate Python distribution.
+
+This fork is **not currently published to the npm registry**, so you install it directly from this GitHub repo. Three options:
+
+### Option 1: Install from GitHub (recommended for end users)
+
 ```bash
-npm install -g codesys-mcp-sp21-plus
+npm install -g github:phobicdotno/Codesys-MCP-SP21-plus
 ```
 
-Or install from the repository:
+After install, the `codesys-mcp-sp21-plus` binary is on your PATH and the MCP client config example in [Quick Start](#quick-start) works as written.
+
+### Option 2: Clone + npm link (recommended for development)
 
 ```bash
 git clone https://github.com/phobicdotno/Codesys-MCP-SP21-plus.git
@@ -43,7 +51,40 @@ npm run build
 npm link
 ```
 
-**Requirements:** Node.js 18+, Windows, CODESYS 3.5 SP19 or SP21 installed.
+`npm link` makes your local checkout the global `codesys-mcp-sp21-plus` binary, so edits to `src/` take effect after `npm run build` without re-installing. (Python script edits hot-reload from `dist/scripts/` even without `npm run build` — see [`tests/TEST_OVERVIEW.md`](tests/TEST_OVERVIEW.md) for the iteration-loop notes.)
+
+### Option 3: Run via `node` directly (no global install)
+
+```bash
+git clone https://github.com/phobicdotno/Codesys-MCP-SP21-plus.git
+cd Codesys-MCP-SP21-plus
+npm install
+npm run build
+```
+
+Then in `.mcp.json`, use `"command": "node"` and a fully-qualified path to `dist/bin.js`:
+
+```json
+{
+  "mcpServers": {
+    "codesys": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\<you>\\Codesys-MCP-SP21-plus\\dist\\bin.js",
+        "--codesys-path", "C:\\Program Files\\CODESYS 3.5.22.10\\CODESYS\\Common\\CODESYS.exe",
+        "--codesys-profile", "CODESYS V3.5 SP22 Patch 1",
+        "--mode", "persistent"
+      ]
+    }
+  }
+}
+```
+
+This avoids touching the global node_modules, useful when the same machine has multiple forks/versions checked out.
+
+**Requirements:** Node.js 18+, Windows, CODESYS 3.5 SP19, SP21 (3.5.21.x), or SP22 (3.5.22.x) installed. CODESYS Git plugin tools additionally require an active **CODESYS Professional Developer Edition** subscription license — without it, every `git_*` call fails fast with a clear PDE-required message.
+
+**Heads-up on `npm install -g codesys-mcp-sp21-plus` (without the `github:` prefix):** that bare-name form is what you'd run *if* this fork were published to the npm registry, but it isn't. It will fail with `404 Not Found`. Use one of the three options above.
 
 ## Quick Start
 
