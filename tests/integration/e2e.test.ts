@@ -94,6 +94,52 @@ describe('E2E Script Preparation', () => {
     expect(script).not.toMatch(/\{[A-Z_]+\}/);
   });
 
+  it('add_library script gates save() on resolution and backs out unresolved placeholders', () => {
+    // Regression: add_library used to call lm.add_library(name) (the
+    // placeholder overload) and then immediately project.save(), even when
+    // the placeholder could not be resolved. The next open then threw
+    // "The placeholder library 'X' could not be resolved." and bricked the
+    // project. The fixed script must:
+    //   - pre-resolve via the IDE-level library_manager.find_library(name)
+    //     and prefer the ManagedLib overload of lm.add_library
+    //   - after add, walk lm.references to locate the new entry and check
+    //     that it resolved (managed -> always; placeholder -> non-empty
+    //     effective_resolution)
+    //   - if not resolved, call lm.remove_library(name) and refuse to save
+    const script = mgr.prepareScriptWithHelpers(
+      'add_library',
+      {
+        PROJECT_FILE_PATH: 'C:\\test.project',
+        LIBRARY_NAME: 'Util',
+      },
+      ['ensure_project_open']
+    );
+    expect(script).toContain('LIBRARY_NAME = "Util"');
+    // Pre-resolve via the IDE-level library_manager
+    expect(script).toContain('library_manager');
+    expect(script).toContain('find_library');
+    // Managed-overload preference
+    expect(script).toContain('add_library(resolved_lib)');
+    // Post-add resolution gate
+    expect(script).toContain('effective_resolution');
+    expect(script).toContain('is_placeholder');
+    expect(script).toContain('_is_resolved');
+    // Back-out path on failure
+    expect(script).toContain('remove_library');
+    // The actionable error string the user will see
+    expect(script).toContain('not installed in the CODESYS library repository');
+    // save() in the body of add_library proper must come AFTER the
+    // resolution gate. (The ensure_project_open helper, prepended above,
+    // also calls primary_project.save() once -- so use lastIndexOf to
+    // pick up the add_library save call.)
+    const saveIdx = script.lastIndexOf('primary_project.save()');
+    const gateIdx = script.indexOf('_is_resolved(new_ref)');
+    expect(gateIdx).toBeGreaterThan(0);
+    expect(saveIdx).toBeGreaterThan(gateIdx);
+    // No unsubstituted placeholders
+    expect(script).not.toMatch(/\{[A-Z_]+\}/);
+  });
+
   it('check_status script has no placeholders after load', () => {
     const script = mgr.loadTemplate('check_status');
     // check_status has no {PLACEHOLDER} params
