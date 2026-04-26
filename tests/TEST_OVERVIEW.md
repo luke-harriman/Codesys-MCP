@@ -12,7 +12,31 @@ The benchmark drives `HeadlessExecutor` and `CodesysLauncher` directly (no MCP s
 
 ## Headline result: persistent is ~15–20× faster
 
-Measured on MCPTest2 (PLCWinNT target, 5 library refs, ~12 POUs) on Windows 11 / SSD with CODESYS V3.5 SP22 Patch 1.
+Measured on MCPTest2 (PLCWinNT target, 5 library refs, 9 POUs) on Windows 11 / SSD with CODESYS V3.5 SP22 Patch 1.
+
+### v5 sweep — 2026-04-26 (persistent only, MCPTest2 v1.3.4.0)
+
+Latest sweep: persistent mode only, 10/10 cases PASS including `set_pou_code` (was failing in v1 due to a bench harness bug — wrong parameter names; fixed inline this run). Times are noticeably faster across the board vs the v1 sweep — likely the combined effect of the ScriptManager cache removal ([`32e6120`](https://github.com/phobicdotno/Codesys-MCP/commit/32e6120)) plus general SP22 Patch 1 IPC improvements. Raw JSON: [`bench-results-v5.json`](bench-results-v5.json).
+
+| Tool | Persistent v5 (mean) | Persistent v1 (mean) | Δ |
+|---|---:|---:|---:|
+| `open_project` (first cold) | 10.6 s | 7.7 s | slower (one-shot) |
+| `open_project` (already-open warm) | 314 ms | 740 ms | **2.4× faster** |
+| `mirror_export` | 724 ms | 1.55 s | **2.1× faster** |
+| `list_project_libraries` | 732 ms | 1.56 s | **2.1× faster** |
+| `get_all_pou_code` | 329 ms | 1.61 s | **4.9× faster** |
+| `save_project` | 1.13 s | 2.10 s | **1.9× faster** |
+| `create_pou (FB)` | 722 ms | 1.54 s | **2.1× faster** |
+| `set_pou_code (decl+impl)` | **729 ms ✅ FIRST PASS** | (bench harness broken) | n/a |
+| `delete_object` | 725 ms | 1.54 s | **2.1× faster** |
+| `bump_project_version` (build) | 728 ms | 1.54 s | **2.1× faster** |
+| `bump_project_version` (build #2) | 1.53 s | 1.56 s | ~same |
+
+Persistent CODESYS launch: 52.8 s (cold, first launch of the session). Subsequent tool calls average ~700-800 ms.
+
+**Bench harness fix:** `set_pou_code` previously failed because the bench passed `POU_PATH` / `DECLARATION_CODE` / `IMPLEMENTATION_CODE` while the script template expects `POU_FULL_PATH` / `DECLARATION_CONTENT` / `IMPLEMENTATION_CONTENT`. Also added the `SET_DECLARATION` / `SET_IMPLEMENTATION` boolean flags now required after [`35abc8c`](https://github.com/phobicdotno/Codesys-MCP/commit/35abc8c) (omitted-decl wipe fix). The earlier "multi-line code escaping" hypothesis turned out to be wrong; the params were just misnamed.
+
+### v1 sweep — historical (both modes)
 
 | Tool | Persistent (mean) | Headless (mean) | Speed-up |
 |---|---:|---:|---:|
@@ -26,9 +50,7 @@ Measured on MCPTest2 (PLCWinNT target, 5 library refs, ~12 POUs) on Windows 11 /
 | `bump_project_version` (build) | 1.54 s | 30.7 s | **20×** |
 | `bump_project_version` (build #2) | 1.56 s | 37.8 s | 24× |
 
-Headless mode pays the full CODESYS startup cost (~22 s after the first warm-up; 58 s on first cold call) on every single tool call. Persistent mode pays it once at launch (~14.6 s) and then every subsequent call is ~1.5 s of pure script execution + IPC overhead.
-
-`set_pou_code` failed in both modes during the bench — that's a **bench harness bug** (multi-line code passed verbatim into a triple-quoted-string interpolation doesn't survive the round-trip). The tool itself works fine through normal MCP calls.
+Headless mode pays the full CODESYS startup cost (~22 s after the first warm-up; 58 s on first cold call) on every single tool call. Persistent mode pays it once at launch (~14.6 s in v1, ~52.8 s in v5) and then every subsequent call is sub-second of pure script execution + IPC overhead.
 
 ## Mode primer
 

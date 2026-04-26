@@ -1,0 +1,214 @@
+{
+  "timestamp": "2026-04-26T17:29:44.212Z",
+  "config": {
+    "project": "\\\\files\\karstein.kvistad\\Documents\\Claude\\PLC\\MCPTest2\\MCPTest2.project",
+    "codesys": "C:\\Program Files\\CODESYS 3.5.22.10\\CODESYS\\Common\\CODESYS.exe",
+    "profile": "CODESYS V3.5 SP22 Patch 1",
+    "iterations": 2
+  },
+  "workDir": "C:\\Users\\KARSTE~1.KVI\\AppData\\Local\\Temp\\codesys-mcp-bench-zFyqn0",
+  "results": {
+    "persistent": [
+      {
+        "id": "open_project",
+        "kind": "read",
+        "n": 2,
+        "min": 314.2161,
+        "max": 10597.3494,
+        "mean": 5455.782749999999,
+        "okCount": 2,
+        "runs": [
+          {
+            "ms": 10597.3494,
+            "ok": true,
+            "outputBytes": 1119,
+            "errorBytes": 0
+          },
+          {
+            "ms": 314.2161,
+            "ok": true,
+            "outputBytes": 770,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "mirror_export",
+        "kind": "read",
+        "n": 2,
+        "min": 722.7774,
+        "max": 725.6119,
+        "mean": 724.1946499999999,
+        "okCount": 2,
+        "runs": [
+          {
+            "ms": 725.6119,
+            "ok": true,
+            "outputBytes": 1155,
+            "errorBytes": 0
+          },
+          {
+            "ms": 722.7774,
+            "ok": true,
+            "outputBytes": 1155,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "list_project_libraries",
+        "kind": "read",
+        "n": 2,
+        "min": 725.8885,
+        "max": 737.2605,
+        "mean": 731.5745,
+        "okCount": 2,
+        "runs": [
+          {
+            "ms": 725.8885,
+            "ok": true,
+            "outputBytes": 3641,
+            "errorBytes": 0
+          },
+          {
+            "ms": 737.2605,
+            "ok": true,
+            "outputBytes": 3641,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "get_all_pou_code",
+        "kind": "read",
+        "n": 2,
+        "min": 327.7713,
+        "max": 329.8949,
+        "mean": 328.8331,
+        "okCount": 2,
+        "runs": [
+          {
+            "ms": 329.8949,
+            "ok": true,
+            "outputBytes": 10528,
+            "errorBytes": 0
+          },
+          {
+            "ms": 327.7713,
+            "ok": true,
+            "outputBytes": 10528,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "save_project",
+        "kind": "read",
+        "n": 2,
+        "min": 742.7032,
+        "max": 1517.3631,
+        "mean": 1130.03315,
+        "okCount": 2,
+        "runs": [
+          {
+            "ms": 1517.3631,
+            "ok": true,
+            "outputBytes": 949,
+            "errorBytes": 0
+          },
+          {
+            "ms": 742.7032,
+            "ok": true,
+            "outputBytes": 949,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "create_pou (FB)",
+        "kind": "write",
+        "n": 1,
+        "min": 722.3895,
+        "max": 722.3895,
+        "mean": 722.3895,
+        "okCount": 1,
+        "runs": [
+          {
+            "ms": 722.3895,
+            "ok": true,
+            "outputBytes": 3088,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "set_pou_code (decl+impl)",
+        "kind": "write",
+        "n": 1,
+        "min": 729.4786,
+        "max": 729.4786,
+        "mean": 729.4786,
+        "okCount": 1,
+        "runs": [
+          {
+            "ms": 729.4786,
+            "ok": true,
+            "outputBytes": 2550,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "delete_object (FB_Bench)",
+        "kind": "write",
+        "n": 1,
+        "min": 725.1215,
+        "max": 725.1215,
+        "mean": 725.1215,
+        "okCount": 1,
+        "runs": [
+          {
+            "ms": 725.1215,
+            "ok": true,
+            "outputBytes": 2484,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "bump_project_version (build)",
+        "kind": "write",
+        "n": 1,
+        "min": 727.8877,
+        "max": 727.8877,
+        "mean": 727.8877,
+        "okCount": 1,
+        "runs": [
+          {
+            "ms": 727.8877,
+            "ok": true,
+            "outputBytes": 1379,
+            "errorBytes": 0
+          }
+        ]
+      },
+      {
+        "id": "bump_project_version (build #2)",
+        "kind": "write",
+        "n": 1,
+        "min": 1527.7274,
+        "max": 1527.7274,
+        "mean": 1527.7274,
+        "okCount": 1,
+        "runs": [
+          {
+            "ms": 1527.7274,
+            "ok": true,
+            "outputBytes": 1379,
+            "errorBytes": 0
+          }
+        ]
+      }
+    ]
+  }
+}

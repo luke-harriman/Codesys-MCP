@@ -91,9 +91,11 @@ function buildCases(projectFilePath) {
         PARENT_PATH: 'PLCWinNT/Plc Logic/Application',
       }, ['ensure_project_open', 'find_object_by_path']) },
     { id: 'set_pou_code (decl+impl)', kind: 'write', script: () => helper('set_pou_code', {
-        POU_PATH: 'PLCWinNT/Plc Logic/Application/FB_Bench',
-        DECLARATION_CODE: 'FUNCTION_BLOCK FB_Bench\nVAR_INPUT\n    iX : INT;\nEND_VAR\nVAR_OUTPUT\n    iY : INT;\nEND_VAR',
-        IMPLEMENTATION_CODE: 'iY := iX * 2;',
+        POU_FULL_PATH: 'PLCWinNT/Plc Logic/Application/FB_Bench',
+        DECLARATION_CONTENT: 'FUNCTION_BLOCK FB_Bench\nVAR_INPUT\n    iX : INT;\nEND_VAR\nVAR_OUTPUT\n    iY : INT;\nEND_VAR',
+        IMPLEMENTATION_CONTENT: 'iY := iX * 2;',
+        SET_DECLARATION: 'True',
+        SET_IMPLEMENTATION: 'True',
       }, ['ensure_project_open', 'find_object_by_path']) },
     { id: 'delete_object (FB_Bench)', kind: 'write', script: () => helper('delete_object', {
         OBJECT_PATH: 'PLCWinNT/Plc Logic/Application/FB_Bench',
