@@ -1,9 +1,16 @@
 """
 Persistent watcher script for CODESYS IPC.
-Runs inside CODESYS via --runscript, starts a background polling thread,
-then RETURNS so the CODESYS UI stays interactive.
 
-Commands are marshaled to the primary thread via execute_on_primary_thread.
+Runs inside CODESYS via --runscript on the primary (UI) thread.
+Polls a commands/ directory and executes each command directly on the
+primary thread (no marshalling). Yields to the IDE between polls via
+``system.delay()``, which serves the message loop and keeps the UI
+interactive.
+
+Why no background thread? CODESYS V3.5 SP21+ removed
+``system.execute_on_primary_thread()``, the API older versions of this
+watcher used to marshal work from a .NET background thread back to the
+UI thread. The single-thread design here works on SP19, SP21, and SP22+.
 
 {IPC_BASE_DIR} is interpolated by Node.js before launch.
 """
@@ -18,7 +25,7 @@ IPC_BASE_DIR = r"{IPC_BASE_DIR}"
 COMMANDS_DIR = os.path.join(IPC_BASE_DIR, "commands")
 RESULTS_DIR = os.path.join(IPC_BASE_DIR, "results")
 POLL_INTERVAL = 50  # milliseconds
-WATCHER_VERSION = "0.3.0"
+WATCHER_VERSION = "0.4.2"
 
 # --- Error capture file (written before anything else can fail) ---
 _ERROR_FILE = os.path.join(IPC_BASE_DIR, "watcher_error.txt")
@@ -48,7 +55,7 @@ try:
             os.remove(file_path)
         os.rename(tmp_path, file_path)
 
-    # --- Write ready signal EARLY (before .NET imports) ---
+    # --- Write ready signal EARLY ---
     ready_path = os.path.join(IPC_BASE_DIR, "ready.signal")
     info = {
         "version": WATCHER_VERSION,
@@ -61,16 +68,12 @@ try:
     atomic_write(ready_path, json.dumps(info, indent=2))
     print("[WATCHER] Ready signal written to %s" % ready_path)
 
-    # --- Import .NET threading (after ready signal) ---
-    _write_error("About to import clr")
-    import clr
-    _write_error("clr imported OK")
-    from System.Threading import Thread, ThreadStart, ManualResetEvent
-    _write_error("System.Threading imported OK")
+    # --- Import scripting engine ---
+    _write_error("About to import scriptengine")
     import scriptengine as se
     _write_error("scriptengine imported OK")
 
-    # --- File-based logging (print from bg thread crashes CODESYS) ---
+    # --- File-based logging ---
     _LOG_FILE = os.path.join(IPC_BASE_DIR, "watcher.log")
 
     def _log(msg):
@@ -93,18 +96,82 @@ try:
         def getvalue(self):
             return ''.join(self._buffer)
 
-    # --- Stop event ---
-    _stop_event = ManualResetEvent(False)
+    def execute_script(script_code, request_id):
+        """Execute script_code synchronously on the current (primary) thread.
+        Returns the result dict to be written to results/."""
+        success = False
+        output = ""
+        error = ""
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        capture = OutputCapture()
+        sys.stdout = capture
+        sys.stderr = capture
+        try:
+            exec_globals = {
+                '__builtins__': __builtins__,
+                'sys': sys,
+                'os': os,
+                'time': time,
+                'traceback': traceback,
+                'shutil': __import__('shutil'),
+            }
+            exec(script_code, exec_globals)
+            output = capture.getvalue()
+            if "SCRIPT_ERROR" in output:
+                success = False
+                error = "Script reported error via SCRIPT_ERROR marker"
+            elif "SCRIPT_SUCCESS" in output:
+                success = True
+            else:
+                success = True
+        except SystemExit as e:
+            output = capture.getvalue()
+            exit_code = e.code
+            if exit_code is None or exit_code == 0:
+                success = True
+                if "SCRIPT_ERROR" in output:
+                    success = False
+                    error = "Script reported error via SCRIPT_ERROR marker"
+            elif isinstance(exit_code, int):
+                if "SCRIPT_SUCCESS" in output and "SCRIPT_ERROR" not in output:
+                    success = True
+                else:
+                    success = False
+                    error = "Script exited with code %s" % exit_code
+            elif isinstance(exit_code, str):
+                success = False
+                error = exit_code
+        except KeyboardInterrupt:
+            # User pressed "Cancel this operation" in CODESYS during this command.
+            # Abort just this command; the watcher loop continues.
+            output = capture.getvalue()
+            error = "Aborted by user (Cancel pressed in CODESYS)"
+            success = False
+        except Exception as e:
+            output = capture.getvalue()
+            error = "%s: %s\n%s" % (type(e).__name__, str(e), traceback.format_exc())
+            success = False
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+
+        return {
+            "requestId": request_id,
+            "success": success,
+            "output": output,
+            "error": error,
+            "timestamp": time.time(),
+        }
 
     def process_command(command_file):
-        """Process a single command. File I/O on bg thread, exec on primary thread."""
+        """Process a single command file end-to-end on the primary thread."""
         command_path = os.path.join(COMMANDS_DIR, command_file)
         request_id = command_file.replace(".command.json", "")
         result_path = os.path.join(RESULTS_DIR, "%s.result.json" % request_id)
 
         _log("Processing command: %s" % request_id)
 
-        # Read command and script (file I/O - safe from bg thread)
         try:
             with open(command_path, "r") as f:
                 command_data = json.loads(f.read())
@@ -122,106 +189,16 @@ try:
                 "error": "Read error: %s" % read_err,
                 "timestamp": time.time(),
             }))
+            _cleanup_command_files(command_path, request_id)
             return
 
-        # Cross-thread communication
-        shared_result = [None]
-        done_event = ManualResetEvent(False)
+        result = execute_script(script_code, request_id)
+        atomic_write(result_path, json.dumps(result))
+        _log("Result written: success=%s" % result.get("success"))
 
-        def execute_on_ui():
-            success = False
-            output = ""
-            error = ""
-            old_stdout = sys.stdout
-            old_stderr = sys.stderr
-            capture = OutputCapture()
-            sys.stdout = capture
-            sys.stderr = capture
-            try:
-                exec_globals = {
-                    '__builtins__': __builtins__,
-                    'sys': sys,
-                    'os': os,
-                    'time': time,
-                    'traceback': traceback,
-                    'shutil': __import__('shutil'),
-                }
-                exec(script_code, exec_globals)
-                output = capture.getvalue()
-                if "SCRIPT_ERROR" in output:
-                    success = False
-                    error = "Script reported error via SCRIPT_ERROR marker"
-                elif "SCRIPT_SUCCESS" in output:
-                    success = True
-                else:
-                    success = True
-            except SystemExit as e:
-                output = capture.getvalue()
-                exit_code = e.code
-                if exit_code is None or exit_code == 0:
-                    success = True
-                    if "SCRIPT_ERROR" in output:
-                        success = False
-                        error = "Script reported error via SCRIPT_ERROR marker"
-                elif isinstance(exit_code, int):
-                    if "SCRIPT_SUCCESS" in output and "SCRIPT_ERROR" not in output:
-                        success = True
-                    else:
-                        success = False
-                        error = "Script exited with code %s" % exit_code
-                elif isinstance(exit_code, str):
-                    success = False
-                    error = exit_code
-            except Exception as e:
-                output = capture.getvalue()
-                error = "%s: %s\n%s" % (type(e).__name__, str(e), traceback.format_exc())
-                success = False
-            finally:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
+        _cleanup_command_files(command_path, request_id)
 
-            shared_result[0] = {
-                "requestId": request_id,
-                "success": success,
-                "output": output,
-                "error": error,
-                "timestamp": time.time(),
-            }
-            done_event.Set()
-
-        # Marshal execution to the primary thread
-        _log("Marshaling to primary thread...")
-        try:
-            se.system.execute_on_primary_thread(execute_on_ui)
-        except Exception as marshal_err:
-            _log("Marshal error: %s" % marshal_err)
-            shared_result[0] = {
-                "requestId": request_id,
-                "success": False,
-                "output": "",
-                "error": "Marshal error: %s" % marshal_err,
-                "timestamp": time.time(),
-            }
-            done_event.Set()
-
-        # Wait for completion (2 min timeout)
-        done_event.WaitOne(120000)
-
-        # Write result (file I/O - safe from bg thread)
-        if shared_result[0]:
-            atomic_write(result_path, json.dumps(shared_result[0]))
-            _log("Result written: success=%s" % shared_result[0].get("success"))
-        else:
-            _log("ERROR: No result after timeout")
-            atomic_write(result_path, json.dumps({
-                "requestId": request_id,
-                "success": False,
-                "output": "",
-                "error": "Timeout waiting for primary thread execution",
-                "timestamp": time.time(),
-            }))
-
-        # Cleanup command and script files
+    def _cleanup_command_files(command_path, request_id):
         try:
             if os.path.exists(command_path):
                 os.remove(command_path)
@@ -231,41 +208,58 @@ try:
         except:
             pass
 
+    def _terminate_requested():
+        return os.path.exists(os.path.join(IPC_BASE_DIR, "terminate.signal"))
 
-    def worker():
-        _log("Background worker started")
-        while not _stop_event.WaitOne(POLL_INTERVAL):
-            try:
-                if os.path.exists(os.path.join(IPC_BASE_DIR, "terminate.signal")):
-                    _log("Terminate signal received")
-                    break
-                cmd_files = sorted([
-                    f for f in os.listdir(COMMANDS_DIR)
-                    if f.endswith(".command.json")
-                ])
-                if cmd_files:
-                    process_command(cmd_files[0])
-            except Exception as e:
-                _log("Worker error: %s" % e)
-        _log("Background worker stopped")
-
-
-    # --- Start background worker thread and RETURN ---
-    print("[WATCHER] Starting background watcher v%s" % WATCHER_VERSION)
+    # --- Main loop on the primary thread ---
+    print("[WATCHER] Starting watcher v%s (single-thread, primary)" % WATCHER_VERSION)
     print("[WATCHER] IPC directory: %s" % IPC_BASE_DIR)
     print("[WATCHER] Python version: %s" % sys.version)
+    _log("Watcher main loop entered")
 
-    t = Thread(ThreadStart(worker))
-    t.IsBackground = True
-    t.Start()
+    def _safe_delay(ms):
+        """Yield via system.delay() but swallow KeyboardInterrupt.
 
-    import System
-    System.GC.KeepAlive(t)
+        CODESYS injects KeyboardInterrupt into the script when the user
+        clicks "Click here to CANCEL this operation" in the IDE. The
+        watcher should keep running across that -- only an explicit
+        terminate.signal or process kill should stop it.
+        """
+        try:
+            se.system.delay(ms)
+        except KeyboardInterrupt:
+            _log("KeyboardInterrupt during system.delay() - ignored, watcher continues")
 
-    print("[WATCHER] Background thread started, script returning - UI is free")
+    while True:
+        try:
+            if _terminate_requested():
+                _log("Terminate signal received")
+                print("[WATCHER] Terminate signal received, exiting")
+                break
 
+            cmd_files = sorted([
+                f for f in os.listdir(COMMANDS_DIR)
+                if f.endswith(".command.json")
+            ])
+            if cmd_files:
+                process_command(cmd_files[0])
+        except KeyboardInterrupt:
+            _log("KeyboardInterrupt during loop iteration - ignored, watcher continues")
+        except Exception as e:
+            _log("Loop error: %s\n%s" % (e, traceback.format_exc()))
+
+        # Yield: serves the message loop so the UI stays interactive.
+        _safe_delay(POLL_INTERVAL)
+
+    _log("Watcher main loop exited")
+
+except KeyboardInterrupt:
+    # Last-resort: a Cancel that fires before the loop is even reached
+    # (e.g. during scriptengine import or directory setup) should still
+    # exit quietly without the CODESYS exception dialog.
+    _write_error("KeyboardInterrupt outside main loop - exiting quietly")
+    print("[WATCHER] Cancelled by user before main loop; exiting.")
 except Exception as _fatal:
     _write_error("FATAL: %s\n%s" % (_fatal, traceback.format_exc()))
     print("[WATCHER] FATAL ERROR: %s" % _fatal)
     traceback.print_exc()
-# Script returns here. CODESYS UI thread is freed.
