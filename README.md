@@ -1,6 +1,6 @@
 > ## About this fork
 >
-> This is a fork of [luke-harriman/Codesys-MCP](https://github.com/luke-harriman/Codesys-MCP) maintained at [phobicdotno/Codesys-MCP](https://github.com/phobicdotno/Codesys-MCP) on branch `sp21-plus-migration-notes`.
+> **Codesys-MCP-SP22+** -- a fork of [luke-harriman/Codesys-MCP](https://github.com/luke-harriman/Codesys-MCP) maintained at [phobicdotno/Codesys-MCP-SP22-plus](https://github.com/phobicdotno/Codesys-MCP-SP22-plus) on branch `sp21-plus-migration-notes`.
 >
 > **Why fork.** Upstream's watcher relies on `system.execute_on_primary_thread()` to marshal work from a background thread back to the CODESYS UI thread. That API was **removed in CODESYS V3.5 SP21+**, so on SP21 / SP22 every tool call returned the same `Marshal error: The functionality 'system.execute_on_primary_thread(...)' is no longer supported` and the server was effectively unusable on current CODESYS releases.
 >
@@ -11,9 +11,9 @@
 >
 > **Verified state of every tool** is recorded in [`docs/SMOKE-TEST-2026-04-25.md`](docs/SMOKE-TEST-2026-04-25.md): 17 of 28 invocations pass, 8 fail, 3 are partial. The failures are *upstream* bugs unrelated to the SP21+ fix (e.g. `create_folder` keyword mismatch, JSON `long` serialization in `compile_project`, online-API drift in `connect_to_device` / `write_variable`) and are tracked there for follow-up PRs.
 
-# codesys-mcp-persistent
+# Codesys-MCP-SP22+
 
-MCP server for CODESYS with a persistent UI instance and file-based IPC.
+MCP server for CODESYS with a persistent UI instance and file-based IPC. npm package: `codesys-mcp-sp22-plus`.
 
 Unlike headless-only approaches that spawn a new CODESYS process per command, this server launches CODESYS **with its UI visible** and keeps it running. MCP tool calls are sent to the same instance via a file-based IPC watcher, so changes appear in real-time and the user can interact with the IDE alongside AI-driven automation.
 
@@ -30,14 +30,14 @@ Unlike headless-only approaches that spawn a new CODESYS process per command, th
 ## Installation
 
 ```bash
-npm install -g codesys-mcp-persistent
+npm install -g codesys-mcp-sp22-plus
 ```
 
 Or install from the repository:
 
 ```bash
-git clone https://github.com/luke-harriman/Codesys-MCP.git
-cd Codesys-MCP
+git clone https://github.com/phobicdotno/Codesys-MCP-SP22-plus.git
+cd Codesys-MCP-SP22-plus
 npm install
 npm run build
 npm link
@@ -53,7 +53,7 @@ Add to your `.mcp.json` (Claude Code configuration):
 {
   "mcpServers": {
     "codesys": {
-      "command": "codesys-mcp-persistent",
+      "command": "codesys-mcp-sp22-plus",
       "args": [
         "--codesys-path", "C:\\Program Files\\CODESYS 3.5.21.0\\CODESYS\\Common\\CODESYS.exe",
         "--codesys-profile", "CODESYS V3.5 SP21 Patch 3",
@@ -67,7 +67,7 @@ Add to your `.mcp.json` (Claude Code configuration):
 Or run directly:
 
 ```bash
-codesys-mcp-persistent \
+codesys-mcp-sp22-plus \
   --codesys-path "C:\Program Files\CODESYS 3.5.21.0\CODESYS\Common\CODESYS.exe" \
   --codesys-profile "CODESYS V3.5 SP21 Patch 3"
 ```
@@ -178,7 +178,7 @@ Falls back to the original approach: each tool call spawns a new CODESYS process
 ## Detect Installed Versions
 
 ```bash
-codesys-mcp-persistent --detect
+codesys-mcp-sp22-plus --detect
 ```
 
 Scans `Program Files` and `Program Files (x86)` for CODESYS installations.

@@ -1,10 +1,10 @@
 {
-  "name": "codesys-mcp-persistent",
+  "name": "codesys-mcp-sp22-plus",
   "version": "0.4.0",
-  "description": "MCP server for CODESYS with persistent UI instance and file-based IPC",
+  "description": "Codesys-MCP-SP22+ -- fork of luke-harriman/Codesys-MCP carrying CODESYS V3.5 SP22 Patch 1 fixes (and forward-compat with later SPs): script-engine API drift, online/runtime tool auto-login, dual-SHA release classifier, set_pou_code omitted-decl wipe fix, add_library managed-overload, etc. MCP server for CODESYS with persistent UI instance and file-based IPC.",
   "main": "dist/server.js",
   "bin": {
-    "codesys-mcp-persistent": "dist/bin.js"
+    "codesys-mcp-sp22-plus": "dist/bin.js"
   },
   "files": [
     "dist/",
@@ -26,12 +26,12 @@
     "persistent",
     "ui"
   ],
-  "author": "luke-harriman",
+  "author": "luke-harriman (upstream); phobicdotno (SP22+ fork)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/luke-harriman/Codesys-MCP.git"
+    "url": "https://github.com/phobicdotno/Codesys-MCP-SP22-plus.git"
   },
-  "homepage": "https://github.com/luke-harriman/Codesys-MCP#readme",
+  "homepage": "https://github.com/phobicdotno/Codesys-MCP-SP22-plus#readme",
   "license": "MIT",
   "engines": {
     "node": ">=18"

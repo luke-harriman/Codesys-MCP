@@ -1,4 +1,4 @@
-# Codesys-MCP — test overview, tool inventory, broken-tool deep dive
+# Codesys-MCP-SP22+ — test overview, tool inventory, broken-tool deep dive
 
 A complete map of the **37 tools** registered in [`src/server.ts`](../src/server.ts), with current working/broken status, what each one does, **measured** timings in **headless** vs **persistent** mode, and a deep-dive + landed fix for each broken tool.
 

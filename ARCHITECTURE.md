@@ -42,7 +42,7 @@ The desired workflow: a single CODESYS instance with its UI open, where MCP tool
 Each session creates a unique directory under `os.tmpdir()`:
 
 ```
-%TEMP%/codesys-mcp-persistent/<sessionId>/
+%TEMP%/codesys-mcp-sp22-plus/<sessionId>/
   commands/           Node.js writes here
     <requestId>.py              Script to execute
     <requestId>.command.json    Command trigger file
@@ -239,7 +239,7 @@ Fallback activates when:
 
 ## Differences from Original Toolkit
 
-| Aspect | @codesys/mcp-toolkit | codesys-mcp-persistent |
+| Aspect | @codesys/mcp-toolkit | codesys-mcp-sp22-plus |
 |--------|---------------------|----------------------|
 | CODESYS UI | Hidden (`--noUI`) | Visible (persistent) or hidden (headless) |
 | Process lifetime | New process per command | Single long-running process |

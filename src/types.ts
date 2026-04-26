@@ -1,5 +1,5 @@
 /**
- * Shared TypeScript types for codesys-mcp-persistent
+ * Shared TypeScript types for codesys-mcp-sp22-plus (Codesys-MCP-SP22+)
  */
 
 export type RequestId = string;

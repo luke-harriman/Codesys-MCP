@@ -13,7 +13,12 @@ import { IpcClient, DEFAULT_IPC_CONFIG } from './ipc';
 import { ScriptManager } from './script-manager';
 import { launcherLog } from './logger';
 
-const SESSION_DIR_PREFIX = 'codesys-mcp-persistent';
+// Temp session dir prefix. Was 'codesys-mcp-persistent' under the
+// pre-rename project name; kept stable as the new project name to keep
+// runtime behaviour identical (per-session subdirs are ephemeral, so
+// orphaned ones from the prior name -- if any -- are harmless and clean
+// themselves up when the OS sweeps %TEMP%).
+const SESSION_DIR_PREFIX = 'codesys-mcp-sp22-plus';
 
 /**
  * Returns the PIDs of every CODESYS.exe currently running on this Windows
