@@ -188,7 +188,35 @@ export class CodesysLauncher implements ScriptExecutor {
 
   /** Graceful shutdown */
   async shutdown(): Promise<void> {
-    if (this.state === 'stopped' || this.state === 'stopping') return;
+    // Orphan-killing fallback: if the launcher itself has no tracked PID
+    // (state stopped/error after a fresh MCP server start) but a CODESYS.exe
+    // is alive on the box from a previous session, the previous early-return
+    // would say "shutdown_codesys success" and do nothing. This left the
+    // launcher's refuse-on-duplicate guard permanently blocking new spawns.
+    // Now we taskkill any orphans we can find before the early-return so the
+    // tool actually does something useful in this state.
+    if (this.state === 'stopped' || this.state === 'stopping') {
+      if (this.pid === null) {
+        const orphans = findRunningCodesysPids();
+        if (orphans.length > 0) {
+          launcherLog.info(`shutdown_codesys: launcher has no tracked PID but found ${orphans.length} orphan CODESYS.exe (PIDs: ${orphans.join(', ')}). Force-killing.`);
+          for (const pid of orphans) {
+            try {
+              execSync(`taskkill /PID ${pid}`, { timeout: 5000, stdio: 'ignore' });
+            } catch { /* ignore graceful failures, force-kill below */ }
+          }
+          // Give them a moment to close gracefully
+          await this.sleep(2_000);
+          const stillAlive = findRunningCodesysPids();
+          for (const pid of stillAlive) {
+            try {
+              execSync(`taskkill /F /PID ${pid}`, { timeout: 5000, stdio: 'ignore' });
+            } catch { /* nothing else to try */ }
+          }
+        }
+      }
+      return;
+    }
 
     this.setState('stopping');
     this.stopHealthMonitor();
