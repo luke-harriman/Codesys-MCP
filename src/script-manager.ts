@@ -1,6 +1,11 @@
 /**
  * Python script template loading and interpolation.
- * Loads .py templates from src/scripts/, caches them, and performs {PARAM} replacement.
+ * Loads .py templates from src/scripts/ (or dist/scripts/) and performs
+ * {PARAM} replacement. No caching: a tool call is ~1.5 s of CODESYS time,
+ * so the few-ms cost of re-reading a small .py file each call is invisible
+ * AND it means edits to dist/scripts/ are picked up live without an MCP
+ * restart. This makes iterating on script-side fixes much faster
+ * (relevant for the SP21+ scripting-engine drift bugs we hit on this fork).
  */
 
 import * as fs from 'fs';
@@ -9,28 +14,19 @@ import { ScriptParams } from './types';
 
 export class ScriptManager {
   private scriptsDir: string;
-  private cache: Map<string, string> = new Map();
 
   constructor(scriptsDir?: string) {
     this.scriptsDir = scriptsDir ?? path.join(__dirname, 'scripts');
   }
 
-  /** Synchronously load a template file and cache it */
+  /** Synchronously read a template file. Re-reads on every call -- no cache. */
   loadTemplate(name: string): string {
     const fileName = name.endsWith('.py') ? name : `${name}.py`;
-    const cached = this.cache.get(fileName);
-    if (cached !== undefined) {
-      return cached;
-    }
-
     const filePath = path.join(this.scriptsDir, fileName);
     if (!fs.existsSync(filePath)) {
       throw new Error(`Script template not found: ${filePath}`);
     }
-
-    const content = fs.readFileSync(filePath, 'utf-8');
-    this.cache.set(fileName, content);
-    return content;
+    return fs.readFileSync(filePath, 'utf-8');
   }
 
   /**

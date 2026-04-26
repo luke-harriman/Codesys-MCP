@@ -46,38 +46,84 @@ try:
     parent_name = getattr(parent_object, 'get_name', lambda: str(parent_object))()
     print("DEBUG: Using parent object: %s" % parent_name)
 
-    # Create the folder. The keyword changed between docs and stubs:
-    # Per the SP22 stub Stubs/scriptengine/ScriptObject.pyi, the signature is
-    #     def create_folder(self, foldername): ...
-    # NOT `name=...` (which the original fork code used and got
-    # "create_folder() got an unexpected keyword argument 'name'" against
-    # SP22). Use the positional form first to be agnostic to the keyword
-    # name across SP releases. Fall through to alternate factories if
-    # create_folder is unavailable on the parent at all.
+    # Create the folder. Per the SP22 stubs:
+    #   ScriptObject.create_folder(foldername)             -- on POUs / sub-objects
+    #   ScriptProject.create_folder(foldername, structured_view=None)
+    #                                                       -- on the project itself,
+    #                                                          accepts an explicit view GUID
+    # On SP22 specifically, calling .create_folder('X') on an Application object
+    # returns None silently (no exception, no folder created). The reliable
+    # pathway is to call create_folder on the PROJECT with an explicit
+    # structured_view GUID -- the SV_POU view is where Application's children
+    # live, so a folder there will appear under Application in the IDE tree.
+    #
+    # SV_POU GUID = {21AF5390-2942-461a-BF89-951AAF6999F1}. (Documented in the
+    # ScriptProject.pyi stub; constant since SP3.5.2.0.)
+    SV_POU_GUID_STR = '21AF5390-2942-461a-BF89-951AAF6999F1'
+    sv_pou_guid = None
+    try:
+        from System import Guid
+        sv_pou_guid = Guid(SV_POU_GUID_STR)
+    except Exception as guid_e:
+        print("WARN: Could not construct System.Guid for SV_POU: %s" % guid_e)
+
     new_folder = None
-    if hasattr(parent_object, 'create_folder'):
+
+    # Strategy 1: project-level create_folder with explicit POU view. This is
+    # the only call shape that reliably works on SP22 Application children.
+    if hasattr(primary_project, 'create_folder') and sv_pou_guid is not None:
         try:
-            print("DEBUG: Calling parent.create_folder('%s') [positional]" % FOLDER_NAME)
-            new_folder = parent_object.create_folder(FOLDER_NAME)
+            print("DEBUG: Trying primary_project.create_folder('%s', SV_POU)" % FOLDER_NAME)
+            new_folder = primary_project.create_folder(FOLDER_NAME, sv_pou_guid)
+            if new_folder is not None:
+                print("DEBUG: project.create_folder(SV_POU) succeeded.")
         except Exception as e:
-            print("WARN: parent.create_folder('%s') raised: %s -- trying foldername= kwarg." % (FOLDER_NAME, e))
+            print("WARN: primary_project.create_folder('%s', SV_POU) raised: %s" % (FOLDER_NAME, e))
+            new_folder = None
+
+    # Strategy 2: parent.create_folder (positional). Works pre-SP21 and on
+    # parents whose factories haven't been pinned to project-level.
+    if new_folder is None and hasattr(parent_object, 'create_folder'):
+        try:
+            print("DEBUG: Trying parent.create_folder('%s') [positional]" % FOLDER_NAME)
+            new_folder = parent_object.create_folder(FOLDER_NAME)
+            if new_folder is not None:
+                print("DEBUG: parent.create_folder() positional succeeded.")
+        except Exception as e:
+            print("WARN: parent.create_folder('%s') raised: %s" % (FOLDER_NAME, e))
+            new_folder = None
+        if new_folder is None:
             try:
                 new_folder = parent_object.create_folder(foldername=FOLDER_NAME)
+                if new_folder is not None:
+                    print("DEBUG: parent.create_folder(foldername=) succeeded.")
             except Exception as e2:
-                print("WARN: parent.create_folder(foldername='%s') raised: %s -- trying alternate factories." % (FOLDER_NAME, e2))
+                print("WARN: parent.create_folder(foldername='%s') raised: %s" % (FOLDER_NAME, e2))
                 new_folder = None
 
+    # Strategy 3: project-level create_folder default view (POU).
+    if new_folder is None and hasattr(primary_project, 'create_folder'):
+        try:
+            print("DEBUG: Trying primary_project.create_folder('%s') [default view]" % FOLDER_NAME)
+            new_folder = primary_project.create_folder(FOLDER_NAME)
+            if new_folder is not None:
+                print("DEBUG: project.create_folder() default-view succeeded.")
+        except Exception as e:
+            print("WARN: primary_project.create_folder('%s') raised: %s" % (FOLDER_NAME, e))
+            new_folder = None
+
+    # Strategy 4: generic create_object with the folder type UUID. Last-ditch
+    # for non-standard parent types.
     if new_folder is None and hasattr(parent_object, 'create_object'):
-        # CODESYS folder type UUID -- documented "generic IEC folder" type.
-        # Tried as a fallback for parents that don't expose create_folder.
         FOLDER_TYPE_UUID = '85d1215e-6520-4983-9a55-2d39d1f24cb4'
         try:
-            print("DEBUG: parent.create_folder() unavailable. Trying parent.create_object(typeUuid=%s, name='%s')" % (FOLDER_TYPE_UUID, FOLDER_NAME))
+            print("DEBUG: Trying parent.create_object(typeUuid=%s, name='%s')" % (FOLDER_TYPE_UUID, FOLDER_NAME))
             new_folder = parent_object.create_object(typeUuid=FOLDER_TYPE_UUID, name=FOLDER_NAME)
         except Exception as e:
             print("WARN: parent.create_object(typeUuid=%s) raised: %s" % (FOLDER_TYPE_UUID, e))
             new_folder = None
 
+    # Strategy 5: types.IecFolder + parent.add (very old API).
     if new_folder is None and hasattr(script_engine, 'types') and hasattr(script_engine.types, 'IecFolder') and hasattr(parent_object, 'add'):
         try:
             print("DEBUG: Trying parent.add(script_engine.types.IecFolder, name='%s')" % FOLDER_NAME)
@@ -88,9 +134,12 @@ try:
 
     if new_folder is None:
         raise TypeError(
-            "Parent object '%s' of type %s does not support any known folder-creation factory: "
-            "tried create_folder() positional, create_folder(foldername=...), "
-            "create_object(typeUuid=...), and add(script_engine.types.IecFolder)." % (
+            "Parent object '%s' of type %s -- folder creation failed for all known strategies: "
+            "(1) primary_project.create_folder(name, SV_POU), "
+            "(2) parent.create_folder(name), "
+            "(3) primary_project.create_folder(name) default view, "
+            "(4) parent.create_object(typeUuid='85d1215e-...'), "
+            "(5) parent.add(script_engine.types.IecFolder)." % (
                 parent_name, type(parent_object).__name__))
 
     if new_folder:

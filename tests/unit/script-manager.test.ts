@@ -41,10 +41,10 @@ describe('ScriptManager', () => {
     expect(result).toBe('x and y');
   });
 
-  it('cache hit - second load returns same content', () => {
+  it('two loads return identical content (no cache, fresh file read each call)', () => {
     const first = mgr.loadTemplate('check_status');
     const second = mgr.loadTemplate('check_status');
-    expect(first).toBe(second); // Same reference from cache
+    expect(first).toEqual(second);
   });
 
   it('combineScripts concatenates with double newlines', () => {
