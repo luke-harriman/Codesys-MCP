@@ -1,6 +1,6 @@
 > ## About this fork
 >
-> **Codesys-MCP-SP21+** -- a fork of [luke-harriman/Codesys-MCP](https://github.com/luke-harriman/Codesys-MCP) maintained at [phobicdotno/Codesys-MCP-SP21-plus](https://github.com/phobicdotno/Codesys-MCP-SP21-plus) on branch `sp21-plus-migration-notes`.
+> **Codesys-MCP-SP21+** -- a fork of [luke-harriman/Codesys-MCP](https://github.com/luke-harriman/Codesys-MCP) maintained at [phobicdotno/Codesys-MCP-SP21-plus](https://github.com/phobicdotno/Codesys-MCP-SP21-plus) on branch [`sp21-plus-migration-notes`](https://github.com/phobicdotno/Codesys-MCP-SP21-plus/tree/sp21-plus-migration-notes). Published on npm as [`codesys-mcp-sp21-plus`](https://www.npmjs.com/package/codesys-mcp-sp21-plus).
 >
 > **Why fork.** Upstream's watcher relies on `system.execute_on_primary_thread()` to marshal work from a background thread back to the CODESYS UI thread. That API was **removed in CODESYS V3.5 SP21+**, so on SP21 / SP22 every tool call returned the same `Marshal error: The functionality 'system.execute_on_primary_thread(...)' is no longer supported` and the server was effectively unusable on current CODESYS releases.
 >
