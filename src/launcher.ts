@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execSync, ChildProcess } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 import { LauncherConfig, LauncherStatus, CodesysState, IpcResult, ScriptExecutor } from './types';
 import { IpcClient, DEFAULT_IPC_CONFIG } from './ipc';
@@ -14,6 +14,40 @@ import { ScriptManager } from './script-manager';
 import { launcherLog } from './logger';
 
 const SESSION_DIR_PREFIX = 'codesys-mcp-persistent';
+
+/**
+ * Returns the PIDs of every CODESYS.exe currently running on this Windows
+ * machine -- whether spawned by this launcher, by a previous MCP session that
+ * crashed without cleanup, or by the user opening CODESYS interactively.
+ *
+ * Used as a pre-launch guard so the launcher never spawns a second CODESYS
+ * alongside an existing one. Two CODESYS instances against the same project
+ * file race on the lock and the loser pops a "project is currently in use"
+ * modal that freezes the IDE thread, breaking every subsequent script call
+ * with 60s timeouts. The cheapest fix is to refuse the duplicate spawn.
+ *
+ * Returns an empty list on non-Windows or if tasklist fails (we treat that
+ * as "can't tell" rather than blocking; the user always retains the option
+ * to close manually).
+ */
+function findRunningCodesysPids(): number[] {
+  if (process.platform !== 'win32') return [];
+  try {
+    const out = execSync(
+      'tasklist /FI "IMAGENAME eq CODESYS.exe" /FO CSV /NH',
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    const pids: number[] = [];
+    for (const line of out.split(/\r?\n/)) {
+      // CSV with quotes: "CODESYS.exe","12345","Console","1","456,789 K"
+      const m = line.match(/^"CODESYS\.exe","(\d+)"/);
+      if (m) pids.push(Number(m[1]));
+    }
+    return pids;
+  } catch {
+    return [];
+  }
+}
 const READY_TIMEOUT_MS = 60_000;
 const READY_POLL_MS = 500;
 const SHUTDOWN_WAIT_MS = 5_000;
@@ -49,6 +83,29 @@ export class CodesysLauncher implements ScriptExecutor {
       this.setState('error');
       this.lastError = err;
       throw new Error(err);
+    }
+
+    // Refuse to spawn alongside an existing CODESYS.exe. Two instances against
+    // the same project file race on the lock and the loser pops a modal that
+    // freezes script execution. This catches:
+    //   - orphans from a prior MCP session that crashed (exit code 0) without
+    //     taking the IDE down with it
+    //   - the user's own interactive CODESYS instance
+    //   - a CODESYS still mid-shutdown after a previous shutdown_codesys call
+    const existingPids = findRunningCodesysPids();
+    if (existingPids.length > 0) {
+      const msg =
+        `Refusing to launch: ${existingPids.length} CODESYS.exe process(es) ` +
+        `already running (PID(s): ${existingPids.join(', ')}). The MCP launcher ` +
+        `cannot share IPC with an instance it did not spawn, and a second ` +
+        `CODESYS racing on the same project triggers a "project is currently ` +
+        `in use" modal that blocks all script execution. Close the existing ` +
+        `CODESYS window(s) first, or call shutdown_codesys if this server owns ` +
+        `the running instance, then retry.`;
+      launcherLog.warn(msg);
+      this.lastError = msg;
+      this.setState('error');
+      throw new Error(msg);
     }
 
     this.setState('launching');
