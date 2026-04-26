@@ -21,7 +21,26 @@ Install globally from npm:
 npm install -g codesys-mcp-sp21-plus
 ```
 
-Add to your `.mcp.json` (Claude Code configuration) — adjust the path/profile to match your installed CODESYS version:
+Add to your `.mcp.json` (Claude Code configuration) — pick the block matching your installed CODESYS version, or adjust the path/profile to match.
+
+**CODESYS V3.5 SP21 Patch 5:**
+
+```json
+{
+  "mcpServers": {
+    "codesys": {
+      "command": "codesys-mcp-sp21-plus",
+      "args": [
+        "--codesys-path", "C:\\Program Files\\CODESYS 3.5.21.50\\CODESYS\\Common\\CODESYS.exe",
+        "--codesys-profile", "CODESYS V3.5 SP21 Patch 5",
+        "--mode", "persistent"
+      ]
+    }
+  }
+}
+```
+
+**CODESYS V3.5 SP22 Patch 1:**
 
 ```json
 {
