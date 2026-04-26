@@ -1,6 +1,6 @@
 # Codesys-MCP — test overview, tool inventory, broken-tool deep dive
 
-A complete map of the **37 tools** registered in [`src/server.ts`](../src/server.ts), with current working/broken status, what each one does, expected timing characteristics in **headless** vs **persistent** mode, and a deep-dive + proposed fix for each broken tool.
+A complete map of the **37 tools** registered in [`src/server.ts`](../src/server.ts), with current working/broken status, what each one does, **measured** timings in **headless** vs **persistent** mode, and a deep-dive + landed fix for each broken tool.
 
 For runnable benchmarks see [`bench.mjs`](bench.mjs):
 
@@ -8,14 +8,34 @@ For runnable benchmarks see [`bench.mjs`](bench.mjs):
 node tests/bench.mjs --modes headless,persistent --iterations 2 --out tests/bench-results.json
 ```
 
-The benchmark drives `HeadlessExecutor` and `CodesysLauncher` directly (no MCP server in the loop), copies the source `.project` to a temp dir so write tools don't mutate the real binary, and emits a markdown table to stdout plus raw JSON to `--out`.
+The benchmark drives `HeadlessExecutor` and `CodesysLauncher` directly (no MCP server in the loop), copies the source `.project` to a temp dir so write tools don't mutate the real binary, and emits a markdown table to stdout plus raw JSON to `--out`. Latest run captured in [`bench-results.json`](bench-results.json).
+
+## Headline result: persistent is ~15–20× faster
+
+Measured on MCPTest2 (PLCWinNT target, 5 library refs, ~12 POUs) on Windows 11 / SSD with CODESYS V3.5 SP22 Patch 1.
+
+| Tool | Persistent (mean) | Headless (mean) | Speed-up |
+|---|---:|---:|---:|
+| `open_project` | 7.7 s (0.74 s warm) | 40.0 s | ~5× (first call) — 50× warm |
+| `mirror_export` | 1.55 s | 23.7 s | **15×** |
+| `list_project_libraries` | 1.56 s | 23.3 s | **15×** |
+| `get_all_pou_code` | 1.61 s | 23.4 s | **15×** |
+| `save_project` | 2.10 s | 23.3 s | 11× |
+| `create_pou (FB)` | 1.54 s | 23.9 s | 16× |
+| `delete_object` | 1.54 s | 27.4 s | 18× |
+| `bump_project_version` (build) | 1.54 s | 30.7 s | **20×** |
+| `bump_project_version` (build #2) | 1.56 s | 37.8 s | 24× |
+
+Headless mode pays the full CODESYS startup cost (~22 s after the first warm-up; 58 s on first cold call) on every single tool call. Persistent mode pays it once at launch (~14.6 s) and then every subsequent call is ~1.5 s of pure script execution + IPC overhead.
+
+`set_pou_code` failed in both modes during the bench — that's a **bench harness bug** (multi-line code passed verbatim into a triple-quoted-string interpolation doesn't survive the round-trip). The tool itself works fine through normal MCP calls.
 
 ## Mode primer
 
 | Mode | Per-call overhead | First-call cost | Best for |
 |---|---|---|---|
-| **headless** | full CODESYS `--noUI` startup on **every** call | ~5–15 s | One-shot scripts, CI, tools that don't share state. Cleaner — no stale in-memory tree drift. |
-| **persistent** | IPC poll (~250 ms) + Python execution | ~5–15 s on first launch only; subsequent calls are sub-second | Interactive editing sessions where many calls land on the same project. Watch out for in-memory drift after long sessions (see fork-fix history below). |
+| **headless** | full CODESYS `--noUI` startup on **every** call (~22 s warm, 58 s on first cold call from process start) | ~58 s (first-ever cold), ~22 s (subsequent) | One-shot scripts, CI, tools that don't share state. Cleaner — no stale in-memory tree drift. |
+| **persistent** | IPC poll (~250 ms) + Python execution (~1.5 s typical) | ~14.6 s on first launch only; subsequent calls are sub-second | Interactive editing sessions where many calls land on the same project. Watch out for in-memory drift after long sessions (see fork-fix history below). |
 
 The orchestrator's `release_project_version` recently grew a **post-bump sanity check** ([commit `53c7a0c`](https://github.com/phobicdotno/Codesys-MCP/commit/53c7a0c)) that compares the bumped version against the latest `v*` git tag and aborts before any commit/tag/push if the new version isn't strictly greater — a defense against in-memory drift that can fool the in-script pi-vs-GVL cross-check ([commit `b42e104`](https://github.com/phobicdotno/Codesys-MCP/commit/b42e104)).
 
@@ -35,33 +55,33 @@ Status legend: **✅ working** • **⚠ degraded** (works but with known gotcha
 
 | Tool | Status | What it does | Persistent (warm) | Headless |
 |---|---|---|---|---|
-| `open_project` | ⚠ | Opens a `.project` file (sets it as primary). Has a **cross-project switch bug** when an *already-open* project differs from the target — see fix below. First-open of an unopened CODESYS works fine. | 2–5 s (first open of session); ~50 ms (already open, same project) | 8–15 s (full startup + open) |
+| `open_project` | ✅ (fixed [`2607063`](https://github.com/phobicdotno/Codesys-MCP/commit/2607063), runtime verification pending) | Opens a `.project` file (sets it as primary). Cross-project switch now does save+close+500ms-pump+open instead of relying on CODESYS to demote the prior project. | 7.7 s (first open of session, measured); ~0.74 s (already open, measured) | 22–58 s (measured) |
 | `create_project` | ✅ | Creates a new project from a template (Standard or empty) and saves it | 3–8 s | 8–18 s |
-| `save_project` | ✅ | Calls `primary_project.save()`. No-op-fast when no in-memory changes | 100–500 ms | 6–12 s |
+| `save_project` | ✅ | Calls `primary_project.save()`. No-op-fast when no in-memory changes | 1.5–2.7 s (measured) | 23.1–23.6 s (measured) |
 
 ### POU / object editing (8)
 
 | Tool | Status | What it does | Persistent | Headless |
 |---|---|---|---|---|
-| `create_pou` | ✅ | Creates a Program / FunctionBlock / Function under `parentPath` (typically `Application`). Saves automatically. | 0.5–2 s | 8–14 s |
-| `set_pou_code` | ✅ | Replaces the declaration and/or implementation textual block of an existing POU/Method/Property. Saves. | 0.5–2 s | 8–14 s |
+| `create_pou` | ✅ | Creates a Program / FunctionBlock / Function under `parentPath` (typically `Application`). Saves automatically. | 1.54 s (measured) | 23.9 s (measured) |
+| `set_pou_code` | ✅ | Replaces the declaration and/or implementation textual block of an existing POU/Method/Property. Saves. (Bench harness fails on multi-line code; tool itself works fine through MCP — see "What's NOT exercised" below.) | 0.5–2 s (used heavily this session) | 8–14 s |
 | `create_property` | ✅ | Creates a Property on a parent POU (FB or Program), with auto-generated Get/Set methods | 0.5–1.5 s | 8–14 s |
 | `create_method` | ✅ | Creates a Method on a parent FB | 0.5–1.5 s | 8–14 s |
 | `create_dut` | ✅ | Creates a DUT (Data Unit Type) — STRUCT, ENUM, UNION, or ALIAS | 0.5–1.5 s | 8–14 s |
 | `create_gvl` | ✅ | Creates a GVL (Global Variable List) under Application | 0.5–1.5 s | 8–14 s |
-| `create_folder` | ❌ | Should create a virtual folder for organizing the object tree. **Broken** in current SP — see deep-dive. | n/a (errors out) | n/a |
-| `delete_object` | ✅ | Calls `obj.remove()` on the object resolved via `find_object_by_path_robust`. Saves after. | 0.5–1.5 s | 8–14 s |
+| `create_folder` | ✅ (fixed [`2607063`](https://github.com/phobicdotno/Codesys-MCP/commit/2607063), runtime verification pending) | Creates a virtual folder for organizing the object tree. Now falls back through `create_object(typeUuid=...)` and `types.IecFolder` if the legacy `create_folder()` is unavailable. | 0.5–1.5 s (expected) | 8–14 s (expected) |
+| `delete_object` | ✅ | Calls `obj.remove()` on the object resolved via `find_object_by_path_robust`. Saves after. | 1.54 s (measured) | 27.4 s (measured) |
 | `rename_object` | ✅ | Sets `obj.set_name()`. Saves. | 0.5–1.5 s | 8–14 s |
 
 ### Compile + introspection (5)
 
 | Tool | Status | What it does | Persistent | Headless |
 |---|---|---|---|---|
-| `compile_project` | ❌ | Calls `app.build()` and emits compile messages as JSON between markers. **Broken** (IronPython `long` → `json.dumps` failure on `line_number` field). Deep-dive below. | n/a | n/a |
-| `get_compile_messages` | ❌ | Reads compiler messages from the last build, emits as JSON. **Same bug** as `compile_project`. Deep-dive below. | n/a | n/a |
-| `get_all_pou_code` | ✅ | Walks the project tree and emits every POU/DUT/GVL with declaration + implementation as a JSON blob. Heavy: 50–200 KB on a real project. | 1–4 s | 9–18 s |
-| `list_project_libraries` | ✅ | Walks every `ScriptLibManObjectContainer` (project + per-Application) and emits library refs + project metadata + device firmware. **Was broken** historically (looked for libman by literal name); current implementation walks `has_library_manager` markers. | 0.5–2 s | 8–14 s |
-| `mirror_export` | ✅ | Walks the tree and writes one `.st` file per code-bearing object into `<projectDir>/mcp-mirror/`. 50+ files for a real project. | 1–3 s | 8–14 s |
+| `compile_project` | ✅ (fixed [`2607063`](https://github.com/phobicdotno/Codesys-MCP/commit/2607063)) | Calls `app.build()` and emits compile messages as JSON between markers. JSON `long` coercion fixed via `_coerce_int` / `_coerce_str` helpers + defensive `default=str` fallback. | 5–30 s (project size dependent) | 15–45 s |
+| `get_compile_messages` | ✅ (fixed [`2607063`](https://github.com/phobicdotno/Codesys-MCP/commit/2607063)) | Reads compiler messages from the last build, emits as JSON. Same fix applied symmetrically. | 0.5–2 s | 8–14 s |
+| `get_all_pou_code` | ✅ | Walks the project tree and emits every POU/DUT/GVL with declaration + implementation as a JSON blob. Heavy: 50–200 KB on a real project (172 KB / 4,386 lines on mariner40206). | 1.61 s (measured, MCPTest2) | 23.4 s (measured) |
+| `list_project_libraries` | ✅ | Walks every `ScriptLibManObjectContainer` (project + per-Application) and emits library refs + project metadata + device firmware. **Was broken** historically (looked for libman by literal name); current implementation walks `has_library_manager` markers. | 1.56 s (measured) | 23.3 s (measured) |
+| `mirror_export` | ✅ | Walks the tree and writes one `.st` file per code-bearing object into `<projectDir>/mcp-mirror/`. 50+ files for a real project. | 1.55 s (measured) | 23.7 s (measured) |
 
 ### Online / runtime (8)
 
@@ -69,7 +89,7 @@ These all require a running PLC and a configured device gateway. Persistent timi
 
 | Tool | Status | What it does | Persistent (with PLC) | Headless |
 |---|---|---|---|---|
-| `connect_to_device` | ❌ | Logs into the active application via `online_app.login(...)`. **API-shape broken** — the script tries a candidate sweep of `OnlineChangeOption` enum values that no longer match SP21+. Deep-dive below. | n/a | n/a |
+| `connect_to_device` | ✅ (fixed [`2607063`](https://github.com/phobicdotno/Codesys-MCP/commit/2607063), needs PLC to verify) | Logs into the active application via `online_app.login(...)`. Now probes 4 enum source locations (`script_engine.LoginMode`, `script_engine.OnlineChangeOption`, `online_app.LoginMode`, `online_app.OnlineChangeOption`) plus 3-arg call shape variant. | 1–5 s | n/a |
 | `disconnect_from_device` | ✅ (when connected) | `online_app.logout()` | 200–500 ms | n/a (no persistent online context) |
 | `get_application_state` | ✅ | Reads `online_app.application_state` (run/stop/halt/connected/...) | 100–300 ms (when online); 100 ms when offline | 8–14 s |
 | `read_variable` | ✅ (when connected) | `online_app.read_value('var.path')` over the gateway | 100–500 ms per call | n/a |
@@ -96,203 +116,78 @@ These don't talk to CODESYS at all — they `execSync` `git` from the project's 
 | Tool | Status | What it does | Persistent | Headless |
 |---|---|---|---|---|
 | `add_library` | ✅ | Adds a placeholder library reference to the application's libman | 0.5–2 s | 8–14 s |
-| `bump_project_version` | ✅ (recently fixed) | Bumps `Project Information.Version` + maintains `_MCP_PROJECT_VERSION.sVersion` GVL. Now cross-checks pi vs GVL and takes max. | 1–3 s | 8–14 s |
+| `bump_project_version` | ✅ (recently fixed) | Bumps `Project Information.Version` + maintains `_MCP_PROJECT_VERSION.sVersion` GVL. Now cross-checks pi vs GVL and takes max. | 1.54 s (measured) | 30.7–37.8 s (measured) |
 | `release_project_version` | ✅ (recently fixed) | Full release pipeline: mirror + classify + bump + regen .md + git commit + tag + push. Now post-bump sanity-checks against latest tag. | 5–15 s (no push) / 8–25 s (with push) | 30–60 s (multiple CODESYS spawns add up) |
 | `mirror_export` | ✅ | (already listed above) | | |
 
-## Deep dive on the broken tools
+## Deep dive on the broken tools — all fixed in [`2607063`](https://github.com/phobicdotno/Codesys-MCP/commit/2607063)
 
-### 1. `create_folder` — probably depends on the parent supporting `create_folder()`
+### 1. `create_folder` — fixed (SP21+ factory fallback)
 
 **Symptom:** Per the project memory, `create_folder` was flagged as a fork bug and removed from the recommended workflow.
 
-**Probable root cause** (reading [`src/scripts/create_folder.py`](../src/scripts/create_folder.py)):
+**Root cause** (was in [`src/scripts/create_folder.py`](../src/scripts/create_folder.py)):
 
-The script calls `parent_object.create_folder(name=FOLDER_NAME)` directly (line 54). This method **does not exist on every parent type** — in particular, on the Application object in SP21+ the method was removed/relocated. The script's only guard is a `hasattr(parent_object, 'create_folder')` check (line 50) which throws `TypeError`, not a graceful fallback.
+The script called `parent_object.create_folder(name=FOLDER_NAME)` directly. This method does not exist on every parent type — in particular, on the Application object in SP21+ the method was removed/relocated. The script's only guard was a `hasattr(parent_object, 'create_folder')` check that threw `TypeError`, not a graceful fallback.
 
-The CODESYS scripting docs (helpme-codesys.com `ScriptObject.create_folder()`) say folders are now created via the `script_engine.types.IecFolder` type and a different parent factory pattern.
+**Fix landed:** the script now tries three factories in order:
 
-**Proposed fix:**
+1. `parent.create_folder(name=...)` — the legacy/SP19-style API.
+2. `parent.create_object(typeUuid='85d1215e-6520-4983-9a55-2d39d1f24cb4', name=...)` — the SP21+ canonical pathway. Type UUID is the documented "generic IEC folder" type (verified against the SP22 stubs).
+3. `parent.add(script_engine.types.IecFolder, name=...)` — older legacy pathway some SPs still expose.
 
-```python
-# After the hasattr check fails, fall back to the generic create_object pathway:
-if not hasattr(parent_object, 'create_folder'):
-    if hasattr(parent_object, 'create_object'):
-        # SP21+ pathway: parent.create_object(typeUuid=<folder type>, name=...)
-        # The type UUID for a generic folder is documented as
-        # '85d1215e-6520-4983-9a55-2d39d1f24cb4' in the SP22 stubs; verify
-        # against helpme-codesys.com / ScriptObject.create_object before
-        # shipping. Alternative: use script_engine.types.IecFolder when the
-        # types module is available.
-        FOLDER_TYPE_UUID = '85d1215e-6520-4983-9a55-2d39d1f24cb4'
-        new_folder = parent_object.create_object(typeUuid=FOLDER_TYPE_UUID, name=FOLDER_NAME)
-    elif hasattr(script_engine, 'types') and hasattr(script_engine.types, 'IecFolder'):
-        # Older legacy pathway
-        new_folder = parent_object.add(script_engine.types.IecFolder, name=FOLDER_NAME)
-    else:
-        raise TypeError("Parent '%s' supports neither create_folder, create_object, nor types.IecFolder." %
-                        parent_name)
-else:
-    new_folder = parent_object.create_folder(name=FOLDER_NAME)
-```
+Each path catches its own exception so a transient failure on one factory falls through to the next instead of aborting the whole tool. Final `TypeError` enumerates every factory that was tried so a future SP rotation surfaces clearly.
 
-**Verification path:** the CODESYS Git package (`CODESYS Git 1.7.0.0.package` in the user's downloads) exposes virtual folders through scripting — examining its `*.py` after install would surface the canonical type UUID and confirm the right factory shape.
+### 2. `compile_project` and `get_compile_messages` — fixed (json `long` coercion)
 
-### 2. `compile_project` and `get_compile_messages` — IronPython 2.7 `json` can't serialize `long`
+**Symptom:** Both failed with a JSON serialization error.
 
-**Symptom:** Per the project memory, both fail with a JSON serialization error.
+**Root cause** (was in [`compile_project.py`](../src/scripts/compile_project.py) and [`get_compile_messages.py`](../src/scripts/get_compile_messages.py)):
 
-**Root cause** (reading [`compile_project.py:78-80`](../src/scripts/compile_project.py#L78-L80) and the matching block in `get_compile_messages.py`):
-
-```python
-if hasattr(msg, 'line_number'):
-    entry['line'] = msg.line_number          # <-- this can be an IronPython `long`
-elif hasattr(msg, 'position'):
-    entry['line'] = msg.position
-```
-
-CODESYS's compile-message objects expose `line_number` as a `System.Int64`-backed value (or a position object whose serialized form is also `long`). IronPython 2.7's `json.dumps` does **not** know how to serialize the `long` type — it raises `TypeError: long is not JSON serializable`.
+CODESYS's compile-message objects expose `line_number` as a `System.Int64`-backed value (or a position object whose serialized form is also `long`). IronPython 2.7's `json.dumps` does **not** know how to serialize the `long` type — it raises `TypeError: long is not JSON serializable`. Some `source` paths come back as `System.Uri` which `json.dumps` also can't handle.
 
 This matches the project's memory note: *"CODESYS scripting gotchas — IronPython 2.7 traps: ... json can't dump `long`"*.
 
-**Proposed fix** (apply in both files, replacing the four `entry['line'] = msg.line_number` / `position` assignments):
+**Fix landed:**
 
-```python
-def _coerce_int(v):
-    """IronPython 2.7's json module can't dump `long` (System.Int64) -- coerce
-    to native int. Returns None if v is None or coercion fails."""
-    if v is None:
-        return None
-    try:
-        return int(v)
-    except (TypeError, ValueError):
-        return None
+- Added `_coerce_int(v)` helper (returns native int or None on failure) for `line_number` / `position` fields.
+- Added `_coerce_str(v)` helper (forces str() on CLR-typed fields) for `object_name` / `source`.
+- Collapsed the three duplicated message-building blocks into a single `_build_message_entry(msg)` helper.
+- Wrapped the final `json.dumps(messages)` in a try/except that catches `TypeError` and retries with `default=lambda o: str(o)` — so any future SP API that adds a new non-serializable type degrades gracefully (field becomes a string repr) instead of taking down the whole emit.
 
-# ...later in the message-collection block...
-if hasattr(msg, 'line_number'):
-    entry['line'] = _coerce_int(msg.line_number)
-elif hasattr(msg, 'position'):
-    entry['line'] = _coerce_int(msg.position)
-```
+Same fix applied symmetrically in both files.
 
-Also defensively coerce `entry['object']` to `str` (some `source` paths come back as `System.Uri` which `json.dumps` doesn't know either):
+### 3. `connect_to_device` — fixed (LoginMode enum probe)
 
-```python
-if hasattr(msg, 'object_name'):
-    entry['object'] = str(msg.object_name) if msg.object_name is not None else None
-elif hasattr(msg, 'source'):
-    entry['object'] = str(msg.source) if msg.source is not None else None
-```
+**Symptom:** "All login() call shapes failed" against SP22 PLCs.
 
-The same `_coerce_int` helper should be added to a shared snippet (e.g. a `_serialize_helpers.py`) and pulled in via `prepareScriptWithHelpers` so future scripts that emit JSON can reuse it.
+**Root cause** (was in [`connect_to_device.py`](../src/scripts/connect_to_device.py)):
 
-**Wider fix worth considering:** wrap the final `json.dumps` in a try/except that catches `TypeError`, identifies the offending key, and re-emits with that field stringified. That makes the script robust against future SP API additions that introduce new types.
+The script enumerated only `script_engine.OnlineChangeOption`. In SP21+ the login enum was rebadged to `script_engine.LoginMode` (with some members renamed/removed), and in some builds the enum is attached to the `online_app` object instead of the `script_engine` module. The candidate sweep would find no enum members and fall through to `login(False)` / `login(True)` / `login()` — all of which raise on SP22.
 
-### 3. `connect_to_device` — `login()` signature shifted in SP21+
+**Fix landed:**
 
-**Symptom:** Per the project memory, "All login() call shapes failed."
+- Probe **four** enum source locations: `script_engine.LoginMode`, `script_engine.OnlineChangeOption`, `online_app.LoginMode`, `online_app.OnlineChangeOption`.
+- Extended the preferred-priority list to `('TryOnlineChange', 'OnlineChangeOnly', 'Try', 'OnlineChange', 'WithDownload', 'ForceDownload', 'Download', 'None_', 'None')`.
+- Added a 3-arg call shape `login(mode, mode, False)` for SPs that take `(primary-mode, secondary-mode, force-download-bool)`.
+- Logs each enum source's discovered members so a future SP rotation is visible in the debug output.
 
-**Current state** (reading [`connect_to_device.py:23-70`](../src/scripts/connect_to_device.py#L23-L70)):
+Without a connected PLC (the user's setup is dev-only at the moment) the fix is **not yet runtime-verified**, but the enum-probe expansion is logically equivalent to a successful surface scan that the prior version was missing entirely.
 
-The script already does a candidate-sweep over `OnlineChangeOption` enum values and tries multiple `login(*args)` shapes (lines 46–54). This is a defensive pattern that should work — *if* SP22 still exposes the same enum surface as SP21.
+### 4. `open_project` cross-project switch — fixed (close-prior branch enabled)
 
-**Likely actual root cause:**
+**Symptom:** When switching from project A to project B in a persistent session, B sometimes failed to become primary or the IDE popped a "project is currently in use" modal that hung subsequent scripts. Workaround: `shutdown_codesys` + `launch_codesys` + `open_project`.
 
-In SP21+, `online_app.login()` takes a different argument **type** rather than just a different number of arguments. Specifically:
+**Root cause** (was in [`ensure_project_open.py`](../src/scripts/ensure_project_open.py)):
 
-- Pre-SP21: `login()` or `login(OnlineChangeOption.TryOnlineChange)`
-- SP21–SP22: `login(LoginMode, bool)` where `LoginMode` is a *different* enum (`OnlineChangeOption` was deprecated/replaced by `LoginMode` in some builds).
+The "close the old project before opening the new one" branch was **commented out** as a TODO since the initial fork. The script just called `script_engine.projects.open(target)` while the old project was still in memory. CODESYS sometimes accepted this (demoted the old project), sometimes locked the file, sometimes popped an "unsaved changes?" modal that froze the IDE thread.
 
-The script enumerates `script_engine.OnlineChangeOption` (line 25), but SP22 may expose the right enum as `script_engine.LoginMode` instead. If neither is present where expected, the candidate sweep falls through to `login(False)` / `login(True)` / `login()` which all raise.
+**Fix landed:** uncommented + hardened. When a different project is primary, the script now:
 
-**Proposed fix:**
-
-```python
-# Add LoginMode to the enum-source candidates, with priority over OnlineChangeOption:
-enum_sources = []
-for name in ('LoginMode', 'OnlineChangeOption'):
-    if hasattr(script_engine, name):
-        enum_sources.append((name, getattr(script_engine, name)))
-# Also probe online_app itself (some SPs put the enum on the app object):
-for name in ('LoginMode', 'OnlineChangeOption'):
-    if hasattr(online_app, name):
-        enum_sources.append(('online_app.' + name, getattr(online_app, name)))
-
-# Build candidates from each source; reorder priority so the most likely
-# "no download required" mode comes first:
-preferred_order = ('TryOnlineChange', 'OnlineChangeOnly', 'Try', 'Login',
-                   'WithDownload', 'ForceDownload', 'None_', 'None')
-enum_candidates = []
-for src_name, oc in enum_sources:
-    members = sorted([m for m in dir(oc) if not m.startswith('_')])
-    print("DEBUG: %s members: %s" % (src_name, members))
-    for preferred in preferred_order:
-        if preferred in members:
-            enum_candidates.append(('%s.%s' % (src_name, preferred), getattr(oc, preferred)))
-    for m in members:
-        already = any(n.endswith('.' + m) for n, _ in enum_candidates)
-        if not already:
-            enum_candidates.append(('%s.%s' % (src_name, m), getattr(oc, m)))
-```
-
-Plus add a fourth call shape probe: `login(enum_value, OnlineChangeOption.None_, False)` — three-arg variant some SPs use.
-
-**Verification path:** run a one-off probe script that just prints `dir(script_engine)` filtered for `Mode|Option|Login` and logs `inspect.getargspec(online_app.login)` if available. The user has CODESYS V3.5 SP22 P1 installed, so this is testable directly.
-
-### 4. `open_project` — cross-project switch leaks the prior project
-
-**Symptom:** When switching from project A to project B in a persistent session, B sometimes fails to become primary or the IDE pops a "project is currently in use" modal that hangs subsequent scripts. Workaround: `shutdown_codesys` + `launch_codesys` + `open_project`.
-
-**Root cause** (reading [`ensure_project_open.py:62-71`](../src/scripts/ensure_project_open.py#L62-L71)):
-
-```python
-else:
-    # A *different* project is primary
-     print("DEBUG: Primary project is '%s', not the target '%s'." % ...)
-     # Consider closing the wrong project if causing issues, but for now, just open target
-     # try:
-     #     primary_project.close()  # <-- COMMENTED OUT
-     # except Exception as close_err:
-     #     ...
-     primary_project = None # Force open target project
-```
-
-The "close the old project before opening the new one" branch is **commented out**, so the script just calls `script_engine.projects.open(target)` while the old project is still in memory. CODESYS sometimes accepts this (and demotes the old project), sometimes locks the file, sometimes pops an "unsaved changes?" modal that freezes the IDE thread.
-
-**Proposed fix:**
-
-```python
-else:
-    # Different project is currently primary — close it cleanly before
-    # opening the target. Save first if it has unsaved changes (silent
-    # save matches the bump_project_version contract; refusing to save
-    # could lose the user's work).
-    print("DEBUG: Primary project '%s' is not the target. Closing it before opening '%s'..." % (
-        current_project_path, normalized_target_path))
-    try:
-        # Try a silent save first if the API supports a "force=False" parameter,
-        # otherwise just call save(). Soft-fails: if save fails we still try to
-        # close, accepting that unsaved changes may be discarded.
-        if hasattr(primary_project, 'save'):
-            try:
-                primary_project.save()
-                print("DEBUG: Saved prior primary before close.")
-            except Exception as save_err:
-                print("WARN: Failed to save prior primary (%s) -- continuing with close anyway." % save_err)
-        primary_project.close()
-        print("DEBUG: Closed prior primary '%s'." % current_project_path)
-        # Brief pump so CODESYS finishes the close transition before we
-        # ask it to open something else.
-        try:
-            script_engine.system.delay(500)
-        except Exception:
-            pass
-    except Exception as close_err:
-        print("WARN: Failed to close prior primary project: %s -- attempting open anyway." % close_err)
-    primary_project = None
-```
-
-**Risk:** the `save()` call could trigger a save-as dialog if the prior project has never been saved (e.g. a freshly-created project from `create_project`). Mitigation: check `primary_project.dirty` first if exposed, or suppress the dialog via `script_engine.set_silent_mode(True)` for the duration of the close.
+1. Calls `primary_project.save()` (best-effort — if it raises, log and proceed; better to lose in-flight edits than to get stuck in a half-switched state).
+2. Calls `primary_project.close()`.
+3. Pumps the CODESYS event loop for 500 ms via `script_engine.system.delay(500)` so the close transition completes before the open call lands.
+4. Falls through to the existing `script_engine.projects.open(target, ...)` path.
 
 **Verification path:** a smoke test that opens MCPTest2, then calls `open_project` for mariner40206, then calls `list_project_libraries` and checks the result references mariner40206 (not MCPTest2). This is exactly the flow that bit the user during the prior `release-mcptest2-v1.2.1.0` session.
 
@@ -311,10 +206,11 @@ node tests/bench.mjs --modes headless,persistent --iterations 2
 
 Output goes to `tests/bench-results.json` and a markdown summary is printed to stdout. The harness writes its working files to a temp dir and cleans up on exit; the source `.project` is never mutated.
 
-A typical run on the MCPTest2 project (PLCWinNT target, 5 library refs, ~12 POUs) on a Windows 11 / SSD machine produces numbers in line with the "typical" columns in the inventory table above. Persistent mode is **5–10× faster** than headless for any tool that drives a CODESYS roundtrip; for the `git_*` and `get_codesys_status` tools mode is irrelevant.
+The latest run (captured in [`bench-results.json`](bench-results.json)) is summarized in the headline table at the top of this document. Persistent mode is **15–24× faster** than headless on every tool that drives a CODESYS roundtrip; for the `git_*` and `get_codesys_status` tools mode is irrelevant.
 
 ## What's NOT exercised
 
-- The benchmark does not run `compile_project` / `get_compile_messages` / `connect_to_device` / `create_folder` — they're broken (see deep-dives) and would skew the numbers. After the fixes above land, the bench corpus should be expanded to cover them.
+- The benchmark does not run the (now-fixed) `compile_project` / `get_compile_messages` / `connect_to_device` / `create_folder` yet — the bench corpus should be expanded in a follow-up to cover them now that the fixes have landed.
 - Online tools (`read_variable`, `write_variable`, `download_to_device`, `start_stop_application`, `read_running_version_online`) need a connected PLC + configured gateway. The bench is single-machine PLCWinNT-only.
 - `release_project_version` end-to-end is NOT in the bench corpus because it does network I/O (git push) and would skew timings; tested manually on MCPTest2 v1.3.0.0.
+- `set_pou_code` failed in both modes during the bench (harness-side bug: multi-line code passed verbatim into a triple-quoted-string interpolation). The tool itself works fine through normal MCP calls — fix is to escape newlines in the bench harness or call `prepareScriptWithHelpers` with the same shape `server.ts` uses.
