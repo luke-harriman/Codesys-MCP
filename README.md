@@ -29,26 +29,33 @@ Unlike headless-only approaches that spawn a new CODESYS process per command, th
 
 ## Installation
 
-This is a Node.js MCP server. There is no `pip install` and the fork is **not** on the npm registry — install it via `git clone`.
+This is a Node.js MCP server. There is no `pip install` — the `.py` files under `src/scripts/` are CODESYS IronPython templates bundled inside the npm package, not a separate Python distribution.
 
 **Requirements:** Node.js 18+, Windows, CODESYS 3.5 SP19, SP21 (3.5.21.x), or SP22 (3.5.22.x) installed. CODESYS Git plugin tools (`git_init`, `git_commit`, `git_push`, etc.) additionally require an active **CODESYS Professional Developer Edition** subscription license.
 
-### 1. Clone and build
+```bash
+npm install -g codesys-mcp-sp21-plus
+```
+
+That puts the `codesys-mcp-sp21-plus` binary on your PATH. Wire it into `.mcp.json` per [Quick Start](#quick-start), then start Claude Code.
+
+### From source (development / unreleased changes)
+
+If you want to track this fork's `sp21-plus-migration-notes` branch directly, contribute fixes, or pin to a specific commit, install from source instead:
 
 ```bash
 git clone https://github.com/phobicdotno/Codesys-MCP-SP21-plus.git
 cd Codesys-MCP-SP21-plus
 npm install
 npm run build
+npm link
 ```
 
-That's it for setup. The build produces `dist/bin.js` (CLI entry point) and `dist/server.js` (MCP server entry point).
+`npm link` registers `dist/bin.js` as the global `codesys-mcp-sp21-plus` binary, so the same `.mcp.json` snippet works. Edits to `src/` take effect after `npm run build`; Python script edits hot-reload from `dist/scripts/` without a rebuild.
 
-### 2. Wire it into Claude Code
+To update later: `git pull && npm install && npm run build`.
 
-Pick one of two `.mcp.json` styles. Both work; the only difference is whether you reference the local checkout via a Node-direct command or via a globally-linked bin name.
-
-**Option A — `node dist/bin.js` directly (simplest, no global state):**
+If you'd rather avoid touching the global node_modules, skip `npm link` and reference the local checkout directly in `.mcp.json`:
 
 ```json
 {
@@ -65,28 +72,6 @@ Pick one of two `.mcp.json` styles. Both work; the only difference is whether yo
   }
 }
 ```
-
-Replace `<you>` with your Windows username. Adjust the CODESYS path/profile to match your install (run `node dist/bin.js --detect` from the clone to list installs).
-
-**Option B — `npm link` then reference the bin name** (only useful if you want the same `codesys-mcp-sp21-plus` command on PATH for ad-hoc CLI use too):
-
-```bash
-# inside the clone:
-npm link
-```
-
-`npm link` registers `dist/bin.js` as the global `codesys-mcp-sp21-plus` binary, so the `.mcp.json` example in [Quick Start](#quick-start) (`"command": "codesys-mcp-sp21-plus"`) works as written. Edits to `src/` take effect after `npm run build`; edits to Python files under `src/scripts/` hot-reload from `dist/scripts/` without a rebuild.
-
-### Updating
-
-```bash
-cd Codesys-MCP-SP21-plus
-git pull
-npm install        # only if package.json changed
-npm run build
-```
-
-If you used Option A, no further steps. If you used Option B (`npm link`), the global symlink already points at your checkout, so the rebuilt `dist/` is picked up on the next MCP-server spawn.
 
 ## Quick Start
 
