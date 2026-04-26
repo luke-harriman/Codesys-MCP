@@ -46,12 +46,112 @@ try:
     parent_name = getattr(parent_object, 'get_name', lambda: str(parent_object))()
     print("DEBUG: Using parent object: %s" % parent_name)
 
-    # Create the folder
-    if not hasattr(parent_object, 'create_folder'):
-        raise TypeError("Parent object '%s' of type %s does not support create_folder." % (parent_name, type(parent_object).__name__))
+    # Create the folder. Per the SP22 stubs:
+    #   ScriptObject.create_folder(foldername)             -- on POUs / sub-objects
+    #   ScriptProject.create_folder(foldername, structured_view=None)
+    #                                                       -- on the project itself
+    #
+    # CRITICAL gotcha verified by experiment on SP22 (and confirmed by
+    # the helpme-codesys.com signature): create_folder returns **void**
+    # (Python None), NOT the new folder object. The folder IS created
+    # via side effect; you have to walk the parent's children to find it.
+    # Earlier fork versions treated None as failure -- that was the
+    # whole "v1/v2/v3 fell through every strategy silently" bug.
+    #
+    # Strategy: try each call in order, then immediately walk
+    # parent_object.get_children(False) for a child named FOLDER_NAME.
+    # First strategy that produces such a child wins; the rest are
+    # never tried (avoids creating duplicates).
 
-    print("DEBUG: Calling create_folder: Name='%s'" % FOLDER_NAME)
-    new_folder = parent_object.create_folder(name=FOLDER_NAME)
+    SV_POU_GUID_STR = '21AF5390-2942-461a-BF89-951AAF6999F1'
+    sv_pou_guid = None
+    try:
+        from System import Guid
+        sv_pou_guid = Guid(SV_POU_GUID_STR)
+    except Exception as guid_e:
+        print("WARN: Could not construct System.Guid for SV_POU: %s" % guid_e)
+
+    def _find_folder_under_parent():
+        """Walk parent_object's direct children looking for FOLDER_NAME.
+        Returns the matching child object or None. Used after each
+        strategy to detect side-effect-only success."""
+        try:
+            for child in parent_object.get_children(False):
+                try:
+                    if getattr(child, 'get_name', lambda: None)() == FOLDER_NAME:
+                        return child
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return None
+
+    new_folder = None
+    strategies_tried = []
+
+    # Strategy 1: parent.create_folder(name) positional. Per the docs
+    # this creates the folder in the parent's structured view.
+    if new_folder is None and hasattr(parent_object, 'create_folder'):
+        strategies_tried.append('parent.create_folder(name)')
+        try:
+            print("DEBUG: Trying parent.create_folder('%s')" % FOLDER_NAME)
+            ret = parent_object.create_folder(FOLDER_NAME)
+            new_folder = ret if ret is not None else _find_folder_under_parent()
+            if new_folder is not None:
+                print("DEBUG: parent.create_folder() succeeded (folder found in children).")
+        except Exception as e:
+            print("WARN: parent.create_folder('%s') raised: %s" % (FOLDER_NAME, e))
+
+    # Strategy 2: project.create_folder(name, SV_POU_GUID). The folder
+    # lands in the POU view, which is where Application's children live.
+    if new_folder is None and hasattr(primary_project, 'create_folder') and sv_pou_guid is not None:
+        strategies_tried.append('project.create_folder(name, SV_POU)')
+        try:
+            print("DEBUG: Trying primary_project.create_folder('%s', SV_POU)" % FOLDER_NAME)
+            ret = primary_project.create_folder(FOLDER_NAME, sv_pou_guid)
+            new_folder = ret if ret is not None else _find_folder_under_parent()
+            if new_folder is not None:
+                print("DEBUG: project.create_folder(SV_POU) succeeded (folder found in children).")
+        except Exception as e:
+            print("WARN: primary_project.create_folder('%s', SV_POU) raised: %s" % (FOLDER_NAME, e))
+
+    # Strategy 3: project.create_folder(name) default view.
+    if new_folder is None and hasattr(primary_project, 'create_folder'):
+        strategies_tried.append('project.create_folder(name)')
+        try:
+            print("DEBUG: Trying primary_project.create_folder('%s') [default view]" % FOLDER_NAME)
+            ret = primary_project.create_folder(FOLDER_NAME)
+            new_folder = ret if ret is not None else _find_folder_under_parent()
+            if new_folder is not None:
+                print("DEBUG: project.create_folder() default-view succeeded.")
+        except Exception as e:
+            print("WARN: primary_project.create_folder('%s') raised: %s" % (FOLDER_NAME, e))
+
+    # Strategy 4: generic create_object with the folder type UUID.
+    if new_folder is None and hasattr(parent_object, 'create_object'):
+        FOLDER_TYPE_UUID = '85d1215e-6520-4983-9a55-2d39d1f24cb4'
+        strategies_tried.append('parent.create_object(typeUuid)')
+        try:
+            print("DEBUG: Trying parent.create_object(typeUuid=%s, name='%s')" % (FOLDER_TYPE_UUID, FOLDER_NAME))
+            ret = parent_object.create_object(typeUuid=FOLDER_TYPE_UUID, name=FOLDER_NAME)
+            new_folder = ret if ret is not None else _find_folder_under_parent()
+        except Exception as e:
+            print("WARN: parent.create_object(typeUuid=%s) raised: %s" % (FOLDER_TYPE_UUID, e))
+
+    # Strategy 5: types.IecFolder + parent.add (very old API).
+    if new_folder is None and hasattr(script_engine, 'types') and hasattr(script_engine.types, 'IecFolder') and hasattr(parent_object, 'add'):
+        strategies_tried.append('parent.add(IecFolder)')
+        try:
+            print("DEBUG: Trying parent.add(script_engine.types.IecFolder, name='%s')" % FOLDER_NAME)
+            ret = parent_object.add(script_engine.types.IecFolder, name=FOLDER_NAME)
+            new_folder = ret if ret is not None else _find_folder_under_parent()
+        except Exception as e:
+            print("WARN: parent.add(types.IecFolder) raised: %s" % e)
+
+    if new_folder is None:
+        raise TypeError(
+            "Parent object '%s' of type %s -- folder '%s' could not be created or located after trying %s." % (
+                parent_name, type(parent_object).__name__, FOLDER_NAME, ', '.join(strategies_tried) or '<no strategies available>'))
 
     if new_folder:
         new_folder_name = getattr(new_folder, 'get_name', lambda: FOLDER_NAME)()

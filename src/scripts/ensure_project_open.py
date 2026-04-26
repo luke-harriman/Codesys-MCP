@@ -60,15 +60,37 @@ def ensure_project_open(target_project_path):
                          # traceback.print_exc() # Optional: Print stack trace
                          primary_project = None # Force reopen by falling through
                 else:
-                    # A *different* project is primary
-                     print("DEBUG: Primary project is '%s', not the target '%s'." % (current_project_path, normalized_target_path))
-                     # Consider closing the wrong project if causing issues, but for now, just open target
-                     # try:
-                     #     print("DEBUG: Closing incorrect primary project '%s'..." % current_project_path)
-                     #     primary_project.close() # Be careful with unsaved changes
-                     # except Exception as close_err:
-                     #     print("WARN: Failed to close incorrect primary project: %s" % close_err)
-                     primary_project = None # Force open target project
+                    # A *different* project is primary -- close it cleanly
+                    # before opening the target. Without this, projects.open
+                    # against a different already-primary project tends to
+                    # fail (file lock contention) or pop a "project in use"
+                    # modal that freezes the IDE thread, breaking every
+                    # subsequent script call with 60s timeouts.
+                    #
+                    # Save first so unsaved changes aren't lost. If save
+                    # raises (e.g. transient lock), fall through to close
+                    # anyway -- losing in-flight edits is worse than getting
+                    # stuck in a half-switched state forever.
+                    print("DEBUG: Primary project is '%s', not the target '%s'. Closing it before opening target..." % (
+                        current_project_path, normalized_target_path))
+                    try:
+                        if hasattr(primary_project, 'save'):
+                            try:
+                                primary_project.save()
+                                print("DEBUG: Saved prior primary before close.")
+                            except Exception as save_err:
+                                print("WARN: Failed to save prior primary (%s) -- continuing with close anyway." % save_err)
+                        primary_project.close()
+                        print("DEBUG: Closed prior primary '%s'." % current_project_path)
+                        # Pump CODESYS so the close transition completes
+                        # before we ask it to open something else.
+                        try:
+                            script_engine.system.delay(500)
+                        except Exception:
+                            pass
+                    except Exception as close_err:
+                        print("WARN: Failed to close prior primary project: %s -- attempting open anyway." % close_err)
+                    primary_project = None # Force open target project
 
             except Exception as path_err:
                  # Failed even to get the path of the supposed primary project

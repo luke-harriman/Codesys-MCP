@@ -1,5 +1,72 @@
 import sys, scriptengine as script_engine, os, traceback, json
 
+
+def _coerce_int(v):
+    """IronPython 2.7's json.dumps cannot serialize System.Int64-backed
+    `long` values, which is what CODESYS's compile-message objects expose
+    as line_number / position. Coerce to native int. Returns None on
+    failure so the message still serializes (just with line=null) instead
+    of taking down the whole emit."""
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _coerce_str(v):
+    """Some message fields come back as System.Uri / System.IO.FileInfo /
+    similar CLR objects whose default __str__ json.dumps refuses. Force a
+    str() so the value is always serializable."""
+    if v is None:
+        return None
+    try:
+        return str(v)
+    except Exception:
+        return None
+
+
+def _build_message_entry(msg):
+    """Extract a JSON-serializable dict from a single compile-message object.
+    Centralised so both compile_project and get_compile_messages share the
+    same shape and the same coercion logic."""
+    entry = {}
+    if hasattr(msg, 'severity'):
+        try:
+            sev = str(msg.severity).lower()
+        except Exception:
+            sev = 'unknown'
+        if 'error' in sev:
+            entry['severity'] = 'error'
+        elif 'warning' in sev:
+            entry['severity'] = 'warning'
+        elif 'info' in sev:
+            entry['severity'] = 'info'
+        else:
+            entry['severity'] = sev
+    else:
+        entry['severity'] = 'unknown'
+    text = None
+    for attr in ('text', 'message'):
+        if hasattr(msg, attr):
+            text = _coerce_str(getattr(msg, attr))
+            if text is not None:
+                break
+    if text is None:
+        text = _coerce_str(msg)
+    entry['text'] = text
+    if hasattr(msg, 'object_name'):
+        entry['object'] = _coerce_str(msg.object_name)
+    elif hasattr(msg, 'source'):
+        entry['object'] = _coerce_str(msg.source)
+    if hasattr(msg, 'line_number'):
+        entry['line'] = _coerce_int(msg.line_number)
+    elif hasattr(msg, 'position'):
+        entry['line'] = _coerce_int(msg.position)
+    return entry
+
+
 try:
     print("DEBUG: compile_project script: Project='%s'" % PROJECT_FILE_PATH)
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
@@ -56,29 +123,7 @@ try:
             if msg_objects is not None:
                 messages_found = True
                 for msg in msg_objects:
-                    entry = {}
-                    if hasattr(msg, 'severity'):
-                        sev = str(msg.severity).lower()
-                        if 'error' in sev:
-                            entry['severity'] = 'error'
-                        elif 'warning' in sev:
-                            entry['severity'] = 'warning'
-                        elif 'info' in sev:
-                            entry['severity'] = 'info'
-                        else:
-                            entry['severity'] = sev
-                    else:
-                        entry['severity'] = 'unknown'
-                    entry['text'] = getattr(msg, 'text', getattr(msg, 'message', str(msg)))
-                    if hasattr(msg, 'object_name'):
-                        entry['object'] = msg.object_name
-                    elif hasattr(msg, 'source'):
-                        entry['object'] = str(msg.source)
-                    if hasattr(msg, 'line_number'):
-                        entry['line'] = msg.line_number
-                    elif hasattr(msg, 'position'):
-                        entry['line'] = msg.position
-                    messages.append(entry)
+                    messages.append(_build_message_entry(msg))
                 print("DEBUG: Got %d messages from app.get_message_objects()" % len(messages))
         except Exception as e:
             print("DEBUG: app.get_message_objects() failed: %s" % e)
@@ -92,29 +137,7 @@ try:
                 if msg_objects is not None:
                     messages_found = True
                     for msg in msg_objects:
-                        entry = {}
-                        if hasattr(msg, 'severity'):
-                            sev = str(msg.severity).lower()
-                            if 'error' in sev:
-                                entry['severity'] = 'error'
-                            elif 'warning' in sev:
-                                entry['severity'] = 'warning'
-                            elif 'info' in sev:
-                                entry['severity'] = 'info'
-                            else:
-                                entry['severity'] = sev
-                        else:
-                            entry['severity'] = 'unknown'
-                        entry['text'] = getattr(msg, 'text', getattr(msg, 'message', str(msg)))
-                        if hasattr(msg, 'object_name'):
-                            entry['object'] = msg.object_name
-                        elif hasattr(msg, 'source'):
-                            entry['object'] = str(msg.source)
-                        if hasattr(msg, 'line_number'):
-                            entry['line'] = msg.line_number
-                        elif hasattr(msg, 'position'):
-                            entry['line'] = msg.position
-                        messages.append(entry)
+                        messages.append(_build_message_entry(msg))
                     print("DEBUG: Got %d messages from system.get_message_objects()" % len(messages))
             except Exception as e:
                 print("DEBUG: system.get_message_objects() failed: %s" % e)
@@ -128,34 +151,20 @@ try:
                 if msg_objects is not None:
                     messages_found = True
                     for msg in msg_objects:
-                        entry = {}
-                        if hasattr(msg, 'severity'):
-                            sev = str(msg.severity).lower()
-                            if 'error' in sev:
-                                entry['severity'] = 'error'
-                            elif 'warning' in sev:
-                                entry['severity'] = 'warning'
-                            elif 'info' in sev:
-                                entry['severity'] = 'info'
-                            else:
-                                entry['severity'] = sev
-                        else:
-                            entry['severity'] = 'unknown'
-                        entry['text'] = getattr(msg, 'text', getattr(msg, 'message', str(msg)))
-                        if hasattr(msg, 'object_name'):
-                            entry['object'] = msg.object_name
-                        elif hasattr(msg, 'source'):
-                            entry['object'] = str(msg.source)
-                        if hasattr(msg, 'line_number'):
-                            entry['line'] = msg.line_number
-                        elif hasattr(msg, 'position'):
-                            entry['line'] = msg.position
-                        messages.append(entry)
+                        messages.append(_build_message_entry(msg))
                     print("DEBUG: Got %d messages from system.get_messages()" % len(messages))
             except Exception as e:
                 print("DEBUG: system.get_messages() failed: %s" % e)
 
-    messages_json = json.dumps(messages)
+    # Defensive json.dumps: if a stray field still slips past the coercion
+    # helpers, retry with a default=str fallback so a single odd type
+    # doesn't kill the whole emit. The default param converts unknown
+    # objects via str() instead of raising TypeError.
+    try:
+        messages_json = json.dumps(messages)
+    except TypeError as je:
+        print("WARN: json.dumps raised %s -- retrying with default=str fallback" % je)
+        messages_json = json.dumps(messages, default=lambda o: str(o))
     print("### COMPILE_MESSAGES_START ###")
     print(messages_json)
     print("### COMPILE_MESSAGES_END ###")
