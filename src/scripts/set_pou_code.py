@@ -3,6 +3,11 @@ import sys, scriptengine as script_engine, os, traceback
 POU_FULL_PATH = "{POU_FULL_PATH}" # Expecting format like "Application/MyPOU" or "Folder/SubFolder/MyPOU"
 DECLARATION_CONTENT = """{DECLARATION_CONTENT}"""
 IMPLEMENTATION_CONTENT = """{IMPLEMENTATION_CONTENT}"""
+# Boolean flags from the TS wrapper. "True" if the caller passed the field,
+# "False" if they omitted it. Empty string is a valid intentional value
+# (e.g. "wipe declaration") and must not be conflated with "not provided".
+SET_DECLARATION = {SET_DECLARATION}
+SET_IMPLEMENTATION = {SET_IMPLEMENTATION}
 
 try:
     print("DEBUG: set_pou_code script: POU_FULL_PATH='%s', Project='%s'" % (POU_FULL_PATH, PROJECT_FILE_PATH))
@@ -18,9 +23,7 @@ try:
 
     # --- Set Declaration Part ---
     declaration_updated = False
-    # Check if the content is actually provided (might be None/empty if only impl is set)
-    has_declaration_content = 'DECLARATION_CONTENT' in locals() or 'DECLARATION_CONTENT' in globals()
-    if has_declaration_content and DECLARATION_CONTENT is not None: # Check not None
+    if SET_DECLARATION:
         if hasattr(target_object, 'textual_declaration'):
             decl_obj = target_object.textual_declaration
             if decl_obj and hasattr(decl_obj, 'replace'):
@@ -37,13 +40,12 @@ try:
         else:
             print("WARN: Target '%s' does not have textual_declaration attribute. Skipping declaration update." % target_name)
     else:
-         print("DEBUG: Declaration content not provided or is None. Skipping declaration update.")
+         print("DEBUG: Declaration not provided by caller (SET_DECLARATION=False). Skipping declaration update.")
 
 
     # --- Set Implementation Part ---
     implementation_updated = False
-    has_implementation_content = 'IMPLEMENTATION_CONTENT' in locals() or 'IMPLEMENTATION_CONTENT' in globals()
-    if has_implementation_content and IMPLEMENTATION_CONTENT is not None: # Check not None
+    if SET_IMPLEMENTATION:
         if hasattr(target_object, 'textual_implementation'):
             impl_obj = target_object.textual_implementation
             if impl_obj and hasattr(impl_obj, 'replace'):
@@ -60,7 +62,7 @@ try:
         else:
             print("WARN: Target '%s' does not have textual_implementation attribute. Skipping implementation update." % target_name)
     else:
-        print("DEBUG: Implementation content not provided or is None. Skipping implementation update.")
+        print("DEBUG: Implementation not provided by caller (SET_IMPLEMENTATION=False). Skipping implementation update.")
 
 
     # --- SAVE THE PROJECT TO PERSIST THE CODE CHANGE ---
