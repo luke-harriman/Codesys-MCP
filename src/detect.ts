@@ -79,6 +79,17 @@ export interface PrintConfigOptions {
   sp?: number;
   name?: string;
   date?: string;
+  /**
+   * When set, the caller has already pre-filtered `installs` based on a
+   * .project file's saved profile (see --for-project in bin.ts). printConfig
+   * just renders -- the matching logic stays in bin.ts so detect.ts can stay
+   * independent of inspect.ts. The hint drives the header comment block.
+   */
+  forProjectHint?: {
+    profileName: string;
+    profileVersion: string;
+    matchKind: 'exact' | 'sp-only-fallback';
+  };
 }
 
 export function printConfig(installs: CodesysInstall[], opts: PrintConfigOptions = {}): string {
@@ -118,6 +129,24 @@ export function printConfig(installs: CodesysInstall[], opts: PrintConfigOptions
     lines.push(`// The only hard rule: don't open the SAME .project file from two CODESYS`);
     lines.push(`// instances simultaneously -- file-lock contention pops a "project is`);
     lines.push(`// currently in use" modal that blocks all script execution.`);
+  }
+  if (opts.forProjectHint) {
+    lines.push(`//`);
+    if (opts.forProjectHint.matchKind === 'exact') {
+      lines.push(
+        `// Filtered by --for-project: matches ${opts.forProjectHint.profileName} (project saved on ${opts.forProjectHint.profileVersion})`
+      );
+    } else {
+      lines.push(
+        `// No exact match for project's saved profile (${opts.forProjectHint.profileName}, version ${opts.forProjectHint.profileVersion}).`
+      );
+      lines.push(
+        `// Falling back to all installed SP${opts.forProjectHint.profileName.match(/SP(\d+)/)?.[1] ?? '?'} versions. The patch difference will trigger`
+      );
+      lines.push(
+        `// a CODESYS conversion dialog on first open.`
+      );
+    }
   }
   lines.push(`//`);
   lines.push(`// Profile names are derived from the install directory version. If CODESYS's`);

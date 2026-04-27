@@ -211,4 +211,95 @@ describe('printConfig', () => {
     expect(parsed.mcpServers['codesys-sp19-patch4'].args).toContain('--codesys-path');
     expect(parsed.mcpServers['codesys-sp22-patch1'].args).toContain('--codesys-profile');
   });
+
+  it('forProjectHint exact: header mentions matching profile', () => {
+    const out = printConfig([sp22], {
+      date: '2026-04-27',
+      forProjectHint: {
+        profileName: 'CODESYS V3.5 SP22 Patch 1',
+        profileVersion: '3.5.22.10',
+        matchKind: 'exact',
+      },
+    });
+    expect(out).toContain('Filtered by --for-project');
+    expect(out).toContain('matches CODESYS V3.5 SP22 Patch 1');
+    expect(out).toContain('project saved on 3.5.22.10');
+    expect(out).not.toContain('Falling back');
+  });
+
+  it('forProjectHint sp-only-fallback: header warns about patch difference', () => {
+    const sp22patch3 = fixture({
+      installDir: 'C:\\Program Files\\CODESYS 3.5.22.30',
+      exePath: 'C:\\Program Files\\CODESYS 3.5.22.30\\CODESYS\\Common\\CODESYS.exe',
+      version: '3.5.22.30',
+      sp: 22,
+      patch: 3,
+      profileName: 'CODESYS V3.5 SP22 Patch 3',
+      serverName: 'codesys-sp22-patch3',
+    });
+    const out = printConfig([sp22, sp22patch3], {
+      date: '2026-04-27',
+      forProjectHint: {
+        profileName: 'CODESYS V3.5 SP22 Patch 1',
+        profileVersion: '3.5.22.10',
+        matchKind: 'sp-only-fallback',
+      },
+    });
+    expect(out).toContain("No exact match for project's saved profile");
+    expect(out).toContain('CODESYS V3.5 SP22 Patch 1, version 3.5.22.10');
+    expect(out).toContain('Falling back to all installed SP22 versions');
+    expect(out).toContain('patch difference will trigger');
+    expect(out).toContain('CODESYS conversion dialog');
+  });
+
+  it('forProjectHint with single install collapses entry name to "codesys"', () => {
+    const out = printConfig([sp22], {
+      date: '2026-04-27',
+      forProjectHint: {
+        profileName: 'CODESYS V3.5 SP22 Patch 1',
+        profileVersion: '3.5.22.10',
+        matchKind: 'exact',
+      },
+    });
+    expect(out).toContain('"codesys": {');
+    expect(out).not.toContain('"codesys-sp22-patch1": {');
+    expect(out).toContain('Detected 1 CODESYS installation');
+  });
+
+  it('forProjectHint with multiple sp-fallback matches keeps descriptive names', () => {
+    const sp22patch3 = fixture({
+      installDir: 'C:\\Program Files\\CODESYS 3.5.22.30',
+      exePath: 'C:\\Program Files\\CODESYS 3.5.22.30\\CODESYS\\Common\\CODESYS.exe',
+      version: '3.5.22.30',
+      sp: 22,
+      patch: 3,
+      profileName: 'CODESYS V3.5 SP22 Patch 3',
+      serverName: 'codesys-sp22-patch3',
+    });
+    const out = printConfig([sp22, sp22patch3], {
+      date: '2026-04-27',
+      forProjectHint: {
+        profileName: 'CODESYS V3.5 SP22 Patch 1',
+        profileVersion: '3.5.22.10',
+        matchKind: 'sp-only-fallback',
+      },
+    });
+    expect(out).toContain('"codesys-sp22-patch1": {');
+    expect(out).toContain('"codesys-sp22-patch3": {');
+    expect(out).not.toContain('"codesys": {');
+  });
+
+  it('forProjectHint --name override works when single match', () => {
+    const out = printConfig([sp22], {
+      name: 'production',
+      date: '2026-04-27',
+      forProjectHint: {
+        profileName: 'CODESYS V3.5 SP22 Patch 1',
+        profileVersion: '3.5.22.10',
+        matchKind: 'exact',
+      },
+    });
+    expect(out).toContain('"production": {');
+    expect(out).not.toContain('"codesys-sp22-patch1": {');
+  });
 });

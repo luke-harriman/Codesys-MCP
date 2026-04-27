@@ -244,6 +244,12 @@ Notes:
 - Each server entry spawns its own CODESYS process when first invoked. Don't call `launch_codesys` on both at the same time pointing at projects that overlap — two CODESYS instances racing on the same `.project` file pop a "project is currently in use" modal that blocks every subsequent script.
 - Adding or removing an entry requires a Claude Code restart (the MCP client only reads `.mcp.json` at startup).
 
+If you have a specific `.project` file in mind and don't want to eyeball which install opens it, point `--for-project` at the file and `--print-config` will narrow the snippet to just the matching install (or warn and fall back to same-SP-different-patch if no exact match exists). The match is driven by the project's saved `projectinspectiondata.auxiliary` profile, so it works without launching CODESYS:
+
+```bash
+codesys-mcp-sp21-plus --print-config --for-project "C:\path\to\MyMachine.project"
+```
+
 ## CLI Reference
 
 | Flag | Description | Default |
@@ -259,6 +265,7 @@ Notes:
 | `--detect` | List installed CODESYS versions and exit | — |
 | `--print-config` | Print a ready-to-paste `.mcp.json` snippet for every detected install and exit | — |
 | `--sp <number>` | With `--print-config`: emit only the entry for CODESYS V3.5 SP`<n>` | — |
+| `--for-project <path>` | With `--print-config`: pick only the install(s) matching the `.project` file at `<path>` (exact SP+patch, or fall back to same-SP-different-patch). Mutually exclusive with `--sp`. | — |
 | `--name <name>` | With `--print-config --sp <n>`: override the MCP server entry name | — |
 | `--inspect <path>` | Read a CODESYS `.project` offline (no CODESYS needed) and print its profile name/version + mandatory libraries; uses the `unzip` CLI from Git for Windows / Linux+Mac | — |
 | `--ssh-version <host>` | SSH to a CODESYS Control Linux PLC and print the running project version (extracted from the boot-application binary). Bypasses CODESYS entirely. Requires SSH key auth + passwordless sudo for `strings`. | — |

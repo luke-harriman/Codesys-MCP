@@ -53,6 +53,7 @@ program
   .option('--detect', 'Detect installed CODESYS versions and exit')
   .option('--print-config', 'Print a ready-to-paste .mcp.json snippet for every detected install and exit')
   .option('--sp <number>', 'With --print-config: emit only the entry for CODESYS V3.5 SP<number>')
+  .option('--for-project <path>', 'With --print-config: pick only the install(s) matching the .project file at <path>. Mutually exclusive with --sp.')
   .option('--name <name>', 'With --print-config --sp <n>: override the MCP server entry name')
   .option('--inspect <path>', 'Read a CODESYS .project offline and print profile + mandatory libraries, then exit (no CODESYS needed)')
   .option('--ssh-version <host>', 'SSH to a CODESYS Control Linux PLC and print the running project version (extracted from the boot-application binary), then exit. Bypasses CODESYS entirely.')
@@ -119,6 +120,10 @@ if (opts.sshVersion) {
   process.stderr.write(`\nFound ${installs.length} CODESYS installation(s).\n`);
   process.exit(0);
 } else if (opts.printConfig) {
+  if (opts.forProject !== undefined && opts.sp !== undefined) {
+    process.stderr.write(`--for-project and --sp are mutually exclusive\n`);
+    process.exit(1);
+  }
   const installs = detectInstalls();
   let sp: number | undefined;
   if (opts.sp !== undefined) {
@@ -128,12 +133,55 @@ if (opts.sshVersion) {
       process.exit(1);
     }
   }
-  try {
-    process.stdout.write(printConfig(installs, { sp, name: opts.name }) + '\n');
-    process.exit(0);
-  } catch (err) {
-    process.stderr.write(`${(err as Error).message}\n`);
-    process.exit(1);
+  if (opts.forProject !== undefined) {
+    inspectProjectFile(opts.forProject)
+      .then((res) => {
+        const exact = installs.filter((i) => i.sp === res.sp && i.patch === res.patch);
+        let filtered: typeof installs;
+        let matchKind: 'exact' | 'sp-only-fallback';
+        if (exact.length > 0) {
+          filtered = exact;
+          matchKind = 'exact';
+        } else {
+          const spOnly = installs.filter((i) => i.sp === res.sp);
+          if (spOnly.length === 0) {
+            process.stderr.write(
+              `No installed CODESYS matches the project's required SP (${res.profileName}, version ${res.profileVersion}).\nRun --detect to see what's installed.\n`
+            );
+            process.exit(1);
+          }
+          filtered = spOnly;
+          matchKind = 'sp-only-fallback';
+        }
+        try {
+          process.stdout.write(
+            printConfig(filtered, {
+              name: opts.name,
+              forProjectHint: {
+                profileName: res.profileName,
+                profileVersion: res.profileVersion,
+                matchKind,
+              },
+            }) + '\n'
+          );
+          process.exit(0);
+        } catch (err) {
+          process.stderr.write(`${(err as Error).message}\n`);
+          process.exit(1);
+        }
+      })
+      .catch((err) => {
+        process.stderr.write(`${(err as Error).message}\n`);
+        process.exit(1);
+      });
+  } else {
+    try {
+      process.stdout.write(printConfig(installs, { sp, name: opts.name }) + '\n');
+      process.exit(0);
+    } catch (err) {
+      process.stderr.write(`${(err as Error).message}\n`);
+      process.exit(1);
+    }
   }
 } else {
   // Build server config
