@@ -59,6 +59,14 @@ export interface ServerConfig extends LauncherConfig {
   verbose: boolean;
   debug: boolean;
   mode: ExecutionMode;
+  /**
+   * If true, automatically run mirror_export after every modifying tool
+   * (set_pou_code, create_*, delete_object, rename_object, add_library, etc.)
+   * so an external editor watching <projectDir>/mcp-mirror/ sees the change
+   * immediately. Failures are surfaced as a hint in the tool response, not
+   * as a hard error -- the underlying edit already succeeded.
+   */
+  autoMirror: boolean;
 }
 
 /** Script template parameters */

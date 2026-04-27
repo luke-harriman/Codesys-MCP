@@ -531,6 +531,121 @@ function formatToolResponse(
   };
 }
 
+/**
+ * Auto-mirror context threaded through tools that modify the project.
+ * When --auto-mirror is on, every successful edit triggers a follow-up
+ * mirror_export so an external editor watching <projectDir>/mcp-mirror/
+ * sees the change immediately. Best-effort VSCode integration also opens
+ * the mirror dir in the user's active VSCode window once per project.
+ */
+interface MirrorCtx {
+  autoMirror: boolean;
+  scriptManager: ScriptManager;
+  executor: ScriptExecutor;
+  workspaceDir: string;
+  /** Mirror dirs already added to VSCode this session (per absolute path). */
+  openedInVscode: Set<string>;
+  /** Absolute path to the VSCode `code` CLI shim, or null if not found. */
+  vscodeCli: string | null;
+}
+
+/**
+ * Locate the VSCode CLI shim on Windows. The shim (code.cmd) is what you
+ * want to call from a script -- the bare code.exe is the GUI binary and
+ * doesn't behave the same way for --add / --reuse-window flags.
+ *
+ * Returns absolute path to the .cmd shim, or null if not found.
+ * Best-effort, no error -- the auto-mirror feature still works without
+ * VSCode integration; the user just doesn't get the auto-pop into the
+ * Source Control panel.
+ */
+function findVscodeCli(): string | null {
+  if (process.platform !== 'win32') return null;
+  const candidates = [
+    path.join(process.env.PROGRAMFILES ?? 'C:\\Program Files', 'Microsoft VS Code', 'bin', 'code.cmd'),
+    path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'Microsoft VS Code', 'bin', 'code.cmd'),
+    path.join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft VS Code', 'bin', 'code.cmd'),
+  ];
+  for (const c of candidates) {
+    if (c && fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+/**
+ * Best-effort: add <projectDir>/mcp-mirror to the user's active VSCode
+ * window so they see the source-control diff appear after each edit.
+ * No-op if VSCode CLI wasn't found, if we've already opened this dir
+ * this session, or if the spawn itself fails. Never blocks the tool
+ * response: spawned detached + unref'd.
+ */
+function maybeOpenMirrorInVscode(projectFilePath: string, ctx: MirrorCtx): void {
+  if (!ctx.vscodeCli) return;
+  const mirrorDir = path.join(path.dirname(projectFilePath), 'mcp-mirror');
+  const key = mirrorDir.toLowerCase();
+  if (ctx.openedInVscode.has(key)) return;
+  if (!fs.existsSync(mirrorDir)) return; // mirror_export hasn't created it yet on this call
+  ctx.openedInVscode.add(key);
+  try {
+    // --add appends the folder to the last active window's workspace, which
+    // makes it show up in Explorer + Source Control without opening a new
+    // window. Detached + unref so the launcher doesn't hold a handle to
+    // VSCode after the spawn returns.
+    const child = require('child_process').spawn(
+      ctx.vscodeCli,
+      ['--add', mirrorDir],
+      { detached: true, stdio: 'ignore', windowsHide: true }
+    );
+    child.unref();
+  } catch {
+    // Swallow -- VSCode integration is a UX enhancement, never a blocker.
+  }
+}
+
+async function maybeAutoMirror(
+  projectFilePath: string,
+  editResult: IpcResult,
+  ctx: MirrorCtx
+): Promise<string> {
+  if (!ctx.autoMirror) return '';
+  // Don't mirror after a failed edit -- nothing to refresh, and the error
+  // will already dominate the response.
+  const editSucceeded = editResult.success && editResult.output.includes('SCRIPT_SUCCESS');
+  if (!editSucceeded) return '';
+  try {
+    const script = ctx.scriptManager.prepareScriptWithHelpers(
+      'mirror_export',
+      { PROJECT_FILE_PATH: projectFilePath, MIRROR_ROOT: '' },
+      ['ensure_project_open']
+    );
+    const mirrorResult = await ctx.executor.executeScript(script);
+    const mirrorOk = mirrorResult.success && mirrorResult.output.includes('SCRIPT_SUCCESS');
+    if (mirrorOk) {
+      maybeOpenMirrorInVscode(projectFilePath, ctx);
+      return '\n(auto-mirror: refreshed)';
+    }
+    return `\n(auto-mirror: FAILED -- ${mirrorResult.error ?? 'see CODESYS log'})`;
+  } catch (err) {
+    return `\n(auto-mirror: FAILED -- ${(err as Error).message})`;
+  }
+}
+
+/**
+ * Like formatToolResponse but additionally runs maybeAutoMirror so the
+ * response carries a one-line auto-mirror status when --auto-mirror is on.
+ * Use for tools that modify the .project file. Tools that only read should
+ * keep using formatToolResponse directly.
+ */
+async function formatModifyingResponse(
+  result: IpcResult,
+  successMessage: string,
+  projectFilePath: string,
+  mirrorCtx: MirrorCtx
+): Promise<{ content: Array<{ type: 'text'; text: string }>; isError: boolean }> {
+  const mirrorNote = await maybeAutoMirror(projectFilePath, result, mirrorCtx);
+  return formatToolResponse(result, successMessage + mirrorNote);
+}
+
 /** Check if a file exists (async) */
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -590,6 +705,21 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   }
 
   const scriptManager = new ScriptManager();
+
+  // Auto-mirror context shared by every modifying tool. When --auto-mirror
+  // is enabled, formatModifyingResponse triggers a follow-up mirror_export
+  // after each successful edit, and (best-effort) opens the resulting
+  // <projectDir>/mcp-mirror/ folder in VSCode so the user sees the diff
+  // in the Source Control panel immediately. The set tracks which mirror
+  // dirs we've already opened in VSCode this session so we don't spam.
+  const mirrorCtx: MirrorCtx = {
+    autoMirror: config.autoMirror,
+    scriptManager,
+    executor,
+    workspaceDir: config.workspaceDir,
+    openedInVscode: new Set<string>(),
+    vscodeCli: findVscodeCli(),
+  };
   const workspaceDir = config.workspaceDir;
 
   // Create MCP server

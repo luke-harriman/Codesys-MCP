@@ -44,6 +44,7 @@ program
   .option('--no-auto-launch', 'Do not auto-launch CODESYS on startup')
   .option('--fallback-headless', 'Fall back to headless if persistent fails', true)
   .option('--keep-alive', 'Keep CODESYS running after server stops', false)
+  .option('--auto-mirror', 'Re-run mirror_export after every modifying tool so an external editor watching <projectDir>/mcp-mirror/ sees changes live', false)
   .option('--timeout <ms>', 'Default command timeout in ms', '60000')
   .option('--verbose', 'Enable verbose logging')
   .option('--debug', 'Enable debug logging (more verbose)')
@@ -100,6 +101,7 @@ if (opts.detect) {
     verbose: opts.verbose || false,
     debug: opts.debug || false,
     mode: (opts.mode === 'headless' ? 'headless' : 'persistent') as ExecutionMode,
+    autoMirror: opts.autoMirror || false,
   };
 
   process.stderr.write(`Starting CODESYS MCP Server v${version}\n`);
@@ -107,6 +109,9 @@ if (opts.detect) {
   process.stderr.write(`  Profile: ${config.profileName}\n`);
   process.stderr.write(`  Mode: ${config.mode}\n`);
   process.stderr.write(`  Auto-launch: ${config.autoLaunch}\n`);
+  if (config.autoMirror) {
+    process.stderr.write(`  Auto-mirror: ENABLED (mirror_export runs after every edit)\n`);
+  }
 
   startMcpServer(config).catch((err) => {
     process.stderr.write(`FATAL: ${err.message}\n`);
