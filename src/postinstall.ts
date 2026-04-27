@@ -18,24 +18,24 @@ function shouldSkip(): boolean {
   if (process.env.npm_config_ci === 'true') return true;
 
   // Skip when running inside the package's own dev clone (developer ran
-  // `npm install` on a checkout of this repo). Detect by checking whether
-  // INIT_CWD (npm sets this to the user's invocation cwd) appears to be
-  // a checkout of THIS package, vs a global install or a downstream consumer.
-  // Heuristic: if INIT_CWD contains a package.json whose name matches ours,
-  // it's the dev clone.
+  // `npm install` on a checkout of this repo). The right discriminator is
+  // whether the script's own directory LIVES INSIDE INIT_CWD. If yes, the
+  // install is targeting our own checkout (dev). If no -- even if INIT_CWD
+  // happens to be a clone of this repo -- the script lives in the global
+  // prefix and should print the banner.
+  //
+  // INIT_CWD == npm's invocation cwd.
+  // __dirname == <install-prefix>/codesys-mcp-sp21-plus/dist for global
+  //              installs, == <repo>/dist for the dev case.
   if (process.env.INIT_CWD) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const fs = require('fs');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const path = require('path');
-      const pkgPath = path.join(process.env.INIT_CWD, 'package.json');
-      if (fs.existsSync(pkgPath)) {
-        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
-        if (pkg.name === 'codesys-mcp-sp21-plus') return true;
-      }
+      const rel = path.relative(process.env.INIT_CWD, __dirname);
+      const livesUnderInitCwd = !rel.startsWith('..') && !path.isAbsolute(rel);
+      if (livesUnderInitCwd) return true;
     } catch {
-      // Not a dev clone or unreadable -- fall through and print the banner.
+      // Fall through and print the banner.
     }
   }
 
