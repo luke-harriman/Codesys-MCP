@@ -6,6 +6,7 @@
 import { program } from 'commander';
 import { startMcpServer } from './server';
 import { ServerConfig, ExecutionMode } from './types';
+import { detectInstalls, printConfig } from './detect';
 
 let version = '0.1.0';
 try {
@@ -47,42 +48,45 @@ program
   .option('--verbose', 'Enable verbose logging')
   .option('--debug', 'Enable debug logging (more verbose)')
   .option('--detect', 'Detect installed CODESYS versions and exit')
+  .option('--print-config', 'Print a ready-to-paste .mcp.json snippet for every detected install and exit')
+  .option('--sp <number>', 'With --print-config: emit only the entry for CODESYS V3.5 SP<number>')
+  .option('--name <name>', 'With --print-config --sp <n>: override the MCP server entry name')
   .parse(process.argv);
 
 const opts = program.opts();
 
-// Handle --detect flag
 if (opts.detect) {
-  import('fs').then((fs) => {
-    import('path').then((pathMod) => {
-      const dirs = [
-        'C:\\Program Files',
-        'C:\\Program Files (x86)',
-      ];
-      process.stderr.write('Scanning for CODESYS installations...\n\n');
-      let found = 0;
-      for (const base of dirs) {
-        try {
-          const entries = fs.readdirSync(base);
-          for (const entry of entries) {
-            if (entry.toLowerCase().includes('codesys')) {
-              const commonExe = pathMod.join(base, entry, 'CODESYS', 'Common', 'CODESYS.exe');
-              const exists = fs.existsSync(commonExe);
-              process.stderr.write(`  ${exists ? '[OK]' : '[--]'} ${pathMod.join(base, entry)}\n`);
-              if (exists) {
-                process.stderr.write(`        Exe: ${commonExe}\n`);
-                found++;
-              }
-            }
-          }
-        } catch {
-          // dir doesn't exist
-        }
-      }
-      process.stderr.write(`\nFound ${found} CODESYS installation(s).\n`);
-      process.exit(0);
-    });
-  });
+  const installs = detectInstalls();
+  process.stderr.write('Scanning for CODESYS installations...\n\n');
+  if (installs.length === 0) {
+    process.stderr.write('  (no installations matching "CODESYS X.Y.Z.W" found)\n');
+  } else {
+    for (const i of installs) {
+      process.stderr.write(`  [OK] ${i.installDir}\n`);
+      process.stderr.write(`        Exe:     ${i.exePath}\n`);
+      process.stderr.write(`        Profile: ${i.profileName}\n`);
+      process.stderr.write(`        Suggested entry name: ${i.serverName}\n`);
+    }
+  }
+  process.stderr.write(`\nFound ${installs.length} CODESYS installation(s).\n`);
+  process.exit(0);
+} else if (opts.printConfig) {
+  const installs = detectInstalls();
+  let sp: number | undefined;
+  if (opts.sp !== undefined) {
+    sp = parseInt(opts.sp, 10);
+    if (Number.isNaN(sp)) {
+      process.stderr.write(`--sp must be a number (e.g. --sp 21). Got "${opts.sp}".\n`);
+      process.exit(1);
+    }
+  }
+  try {
+    process.stdout.write(printConfig(installs, { sp, name: opts.name }) + '\n');
+    process.exit(0);
+  } catch (err) {
+    process.stderr.write(`${(err as Error).message}\n`);
+    process.exit(1);
+  }
 } else {
   // Build server config
   const config: ServerConfig = {
