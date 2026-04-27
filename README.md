@@ -61,8 +61,6 @@ The snippet is JSON with `//` comment headers — strip the comments before pars
 
 **4. Restart Claude Code** so it re-reads the MCP config.
 
-> *Note: there's no post-install banner — npm 7+ runs lifecycle scripts in the background and suppresses their stdout/stderr by default ([npm docs](https://docs.npmjs.com/cli/v11/using-npm/scripts)). The `--print-config` step above is the post-install workflow. Power users can opt in to lifecycle stdout with `npm install -g codesys-mcp-sp21-plus --foreground-scripts`, but there's nothing to print.*
-
 See [Installation](#installation) for source-install / upgrade / multi-install setups.
 
 ---
