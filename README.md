@@ -15,13 +15,13 @@ MCP server for CODESYS with a persistent UI instance and file-based IPC. Unlike 
 
 ## Quick Start
 
-Install globally from npm:
+**1. Install globally from npm:**
 
 ```bash
 npm install -g codesys-mcp-sp21-plus
 ```
 
-Generate the `.mcp.json` snippet automatically — `--print-config` scans your installed CODESYS versions and emits a ready-to-paste block per install:
+**2. Generate your `.mcp.json` snippet** — `--print-config` scans your installed CODESYS versions and emits a ready-to-paste block per install:
 
 ```bash
 codesys-mcp-sp21-plus --print-config           # one entry per detected install
@@ -52,7 +52,16 @@ Output looks like this on a machine with two installs:
 }
 ```
 
-Drop the relevant entries into `.mcp.json` (the snippet is JSON with `//` comment headers — strip the comments before parsing if your tooling is strict). `--detect` alone (no `--print-config`) prints just the inventory with paths/profile/suggested-name per install.
+**3. Paste into your MCP config:**
+
+- **Project-scoped** (recommended, shareable via git): `<your-project-root>/.mcp.json`. Create it if it doesn't exist; merge the `mcpServers` entries into the existing object if it does.
+- **User-scoped** (applies to every Claude Code session): `%USERPROFILE%/.claude.json`, or use `claude mcp add codesys codesys-mcp-sp21-plus -- --codesys-path ... --codesys-profile ...`.
+
+The snippet is JSON with `//` comment headers — strip the comments before parsing if your tooling is strict.
+
+**4. Restart Claude Code** so it re-reads the MCP config.
+
+> *Note: there's no post-install banner — npm 7+ runs lifecycle scripts in the background and suppresses their stdout/stderr by default ([npm docs](https://docs.npmjs.com/cli/v11/using-npm/scripts)). The `--print-config` step above is the post-install workflow. Power users can opt in to lifecycle stdout with `npm install -g codesys-mcp-sp21-plus --foreground-scripts`, but there's nothing to print.*
 
 See [Installation](#installation) for source-install / upgrade / multi-install setups.
 
