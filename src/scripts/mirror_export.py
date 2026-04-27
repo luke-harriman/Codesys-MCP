@@ -19,6 +19,47 @@ MIRROR_ROOT = r"{MIRROR_ROOT}"
 ILLEGAL = '<>:"|?*'
 
 
+def resolve_mirror_root(project_file_path):
+    """Default mirror dir when the TS caller passes MIRROR_ROOT=''.
+
+    Mirrors src/mirror-paths.ts resolveMirrorRoot() verbatim so the CODESYS-
+    side script and the Node side agree on the same path. WHY a per-project
+    fallback at all: when two .project files share a parent dir, both used to
+    default to <projectDir>/mcp-mirror/ and clobber each other's exports
+    (and worse, release_project_version's git-tag history mis-attributes
+    commits). Existing single-project setups keep the legacy mcp-mirror/
+    path so v* tag history stays valid.
+    """
+    project_dir = os.path.dirname(project_file_path)
+    legacy = os.path.join(project_dir, 'mcp-mirror')
+    # Rule 1: existing mcp-mirror/ wins, regardless of how many .project
+    # siblings sit beside it. Preserves git history on every project ever
+    # mirrored before this fix landed.
+    try:
+        if os.path.isdir(legacy):
+            return legacy
+    except Exception:
+        pass
+    # Rules 2 + 3: count .project siblings. <=1 = legacy path, multiple =
+    # per-project naming.
+    siblings = 0
+    try:
+        for entry in os.listdir(project_dir):
+            if entry.lower().endswith('.project'):
+                siblings += 1
+    except Exception:
+        # Project dir unreadable (network share blip, perms). Default to
+        # legacy so we don't surprise anyone with a new path on transient
+        # failure.
+        return legacy
+    if siblings <= 1:
+        return legacy
+    base = os.path.basename(project_file_path)
+    if base.lower().endswith('.project'):
+        base = base[:-len('.project')]
+    return os.path.join(project_dir, base + '_mcp_mirror')
+
+
 def sanitise(name):
     s = (name or '').replace('/', '_').replace('\\', '_')
     for c in ILLEGAL:
@@ -168,11 +209,15 @@ def walk(node, parent_fs_dir, parent_proj_path, stats):
 
 
 try:
+    # Empty MIRROR_ROOT means "use the default" -- the TS auto-mirror caller
+    # passes '' so the resolution stays in one place. Resolve here via the
+    # same rule as src/mirror-paths.ts so the CODESYS-side and Node-side
+    # defaults agree (legacy mcp-mirror/ if present or single-project parent;
+    # <basename>_mcp_mirror/ when multiple .project files share the dir).
+    if not MIRROR_ROOT.strip():
+        MIRROR_ROOT = resolve_mirror_root(PROJECT_FILE_PATH)
     print("DEBUG: mirror_export: Project='%s' MirrorRoot='%s'" % (PROJECT_FILE_PATH, MIRROR_ROOT))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
-
-    if not MIRROR_ROOT.strip():
-        raise ValueError("MIRROR_ROOT is empty -- pass mirrorRoot to the tool or rely on the default '<projectDir>/MCP/mirror'.")
 
     if not os.path.exists(MIRROR_ROOT):
         os.makedirs(MIRROR_ROOT)

@@ -17,6 +17,7 @@ import { HeadlessExecutor } from './headless';
 import { ScriptManager } from './script-manager';
 import { serverLog, setLogLevel } from './logger';
 import { readRunningVersionSsh, formatSshVersionResult } from './ssh-version';
+import { resolveMirrorRoot } from './mirror-paths';
 
 /**
  * Classifier for `bump_project_version --level=auto`.
@@ -338,8 +339,12 @@ function renderPouDumpMd(pou: PouEntry[], projectName: string): string {
   return L.join('\n');
 }
 
-function classifyMcpMirrorChanges(projectDir: string): ClassifyResult {
+function classifyMcpMirrorChanges(projectDir: string, mirrorDirName: string = 'mcp-mirror'): ClassifyResult {
   const evidence: string[] = [];
+  // Pathspec for git: posix-style with trailing slash. Caller passes a bare
+  // directory name (relative to projectDir, no separators) so we don't need
+  // to normalise; the multi-project case is e.g. 'ProjectA_mcp_mirror'.
+  const pathspec = `${mirrorDirName}/`;
 
   const isGit = (() => {
     try {
@@ -381,7 +386,7 @@ function classifyMcpMirrorChanges(projectDir: string): ClassifyResult {
     // -w: also ignore whitespace-only changes (defensive; phantom releases
     // shouldn't fire on a stray blank line either).
     raw = execSync(
-      `git -C "${projectDir}" diff --name-status --ignore-cr-at-eol -w -M50% ${baseRef} -- mcp-mirror/`,
+      `git -C "${projectDir}" diff --name-status --ignore-cr-at-eol -w -M50% ${baseRef} -- ${pathspec}`,
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     );
   } catch {
@@ -400,7 +405,7 @@ function classifyMcpMirrorChanges(projectDir: string): ClassifyResult {
   let untracked = '';
   try {
     untracked = execSync(
-      `git -C "${projectDir}" ls-files --others --exclude-standard -- mcp-mirror/`,
+      `git -C "${projectDir}" ls-files --others --exclude-standard -- ${pathspec}`,
       { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
     );
   } catch {
@@ -408,7 +413,7 @@ function classifyMcpMirrorChanges(projectDir: string): ClassifyResult {
   }
 
   if (!raw.trim() && !untracked.trim()) {
-    evidence.push('no changes in mcp-mirror/ since baseline');
+    evidence.push(`no changes in ${pathspec} since baseline`);
     return { kind: 'no-changes', evidence };
   }
 
@@ -582,7 +587,11 @@ function findVscodeCli(): string | null {
  */
 function maybeOpenMirrorInVscode(projectFilePath: string, ctx: MirrorCtx): void {
   if (!ctx.vscodeCli) return;
-  const mirrorDir = path.join(path.dirname(projectFilePath), 'mcp-mirror');
+  // Resolve via the same rule the CODESYS-side mirror_export.py uses, so
+  // the dir we ask VSCode to open is the dir mirror_export actually wrote
+  // to (single-project parents stay on the legacy mcp-mirror/ path; multi-
+  // project parents get a per-project <basename>_mcp_mirror/ path).
+  const mirrorDir = resolveMirrorRoot(projectFilePath);
   const key = mirrorDir.toLowerCase();
   if (ctx.openedInVscode.has(key)) return;
   if (!fs.existsSync(mirrorDir)) return; // mirror_export hasn't created it yet on this call
@@ -1942,7 +1951,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       //          config / visu / Save() touch). Classifier sees no diff but
       //          binary SHA flipped. Classify as build-level bump so the
       //          version still ticks and the change isn't silently dropped.
-      const mirrorDir = path.join(projectDir, 'mcp-mirror');
+      // Resolve the mirror dir via the same rule mirror_export.py uses, so
+      // multi-project parent dirs land in <basename>_mcp_mirror/ and we
+      // SHA-fingerprint / classify / git-add the right tree (legacy single-
+      // project layouts continue to use mcp-mirror/, preserving v* tag
+      // history).
+      const mirrorDir = resolveMirrorRoot(escaped);
+      const mirrorDirName = path.basename(mirrorDir);
       const projectShaNow = (() => {
         try { return sha256OfFile(escaped); } catch { return ''; }
       })();
@@ -1969,7 +1984,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       // 1. Mirror export
       const mirrorScript = scriptManager.prepareScriptWithHelpers(
         'mirror_export',
-        { PROJECT_FILE_PATH: escaped, MIRROR_ROOT: path.join(projectDir, 'mcp-mirror') },
+        { PROJECT_FILE_PATH: escaped, MIRROR_ROOT: mirrorDir },
         ['ensure_project_open']
       );
       const mirrorRes = await executor.executeScript(mirrorScript);
@@ -1978,11 +1993,11 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
       log.push('mirror_export: OK');
       if (mirrorEditedDirectly) {
-        log.push('WARNING: mcp-mirror/ tree differed from the last tag\'s mirror-sha256 BEFORE mirror_export ran, while the .project binary did not change. This usually means you edited .st files in the mirror directly. mirror_export has now overwritten those edits with the current binary state. (mirror_import is not yet implemented; for now, make code changes via the IDE or set_pou_code so they reach the binary first.)');
+        log.push(`WARNING: ${mirrorDirName}/ tree differed from the last tag's mirror-sha256 BEFORE mirror_export ran, while the .project binary did not change. This usually means you edited .st files in the mirror directly. mirror_export has now overwritten those edits with the current binary state. (mirror_import is not yet implemented; for now, make code changes via the IDE or set_pou_code so they reach the binary first.)`);
       }
 
       // 2. Classify mirror diff vs latest v* tag
-      let classification = classifyMcpMirrorChanges(projectDir);
+      let classification = classifyMcpMirrorChanges(projectDir, mirrorDirName);
       // SHA fallback (case c): mirror diff is empty but the project binary
       // SHA changed. Promote a 'no-changes' classification to a build-level
       // bump so non-textual changes still tick the version.
@@ -1998,7 +2013,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       if (classification.kind === 'no-changes') {
         return {
           content: [{ type: 'text' as const, text:
-            'release_project_version: no version change -- mcp-mirror/ matches latest v* tag and project-sha256 is unchanged.\n\n' +
+            `release_project_version: no version change -- ${mirrorDirName}/ matches latest v* tag and project-sha256 is unchanged.\n\n` +
             classification.evidence.map((e) => `  - ${e}`).join('\n')
           }],
           isError: false,
@@ -2104,7 +2119,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       try {
         const mirrorScript2 = scriptManager.prepareScriptWithHelpers(
           'mirror_export',
-          { PROJECT_FILE_PATH: escaped, MIRROR_ROOT: path.join(projectDir, 'mcp-mirror') },
+          { PROJECT_FILE_PATH: escaped, MIRROR_ROOT: mirrorDir },
           ['ensure_project_open']
         );
         const mirror2 = await executor.executeScript(mirrorScript2);
@@ -2182,7 +2197,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       // 8. Git add / commit / tag / push
       try {
         const projName = path.basename(escaped);
-        const candidatePaths = ['mcp-mirror', 'library.md', 'pou-dump.md', 'README.md', 'Changelog.md', '.gitignore', projName];
+        const candidatePaths = [mirrorDirName, 'library.md', 'pou-dump.md', 'README.md', 'Changelog.md', '.gitignore', projName];
         const addPaths = candidatePaths.filter((p) => fs.existsSync(path.join(projectDir, p)));
         const addArgs = addPaths.map((p) => `"${p}"`).join(' ');
         execSync(`git -C "${projectDir}" add ${addArgs}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -2302,16 +2317,16 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'mirror_export',
-    "Walks the CODESYS project tree and writes one .st file per code-bearing object into a filesystem mirror, preserving the project tree as nested directories. Programs / Function Blocks / Functions / Methods / Properties / DUTs / GVLs / Interfaces all become text files; structural nodes (Devices, Applications, Folders) become directories. Each file carries a header comment with its original CODESYS project path so a future write-back tool can map it back to set_pou_code's pouPath. Read-only -- does NOT modify the CODESYS project. UTF-8 output. If mirrorRoot is omitted, defaults to '<projectDir>/mcp-mirror'.",
+    "Walks the CODESYS project tree and writes one .st file per code-bearing object into a filesystem mirror, preserving the project tree as nested directories. Programs / Function Blocks / Functions / Methods / Properties / DUTs / GVLs / Interfaces all become text files; structural nodes (Devices, Applications, Folders) become directories. Each file carries a header comment with its original CODESYS project path so a future write-back tool can map it back to set_pou_code's pouPath. Read-only -- does NOT modify the CODESYS project. UTF-8 output. If mirrorRoot is omitted, defaults to '<projectDir>/mcp-mirror' (or '<projectDir>/<projectname>_mcp_mirror' when several .project files share the parent dir).",
     {
       projectFilePath: z.string().describe("Path to the project file."),
-      mirrorRoot: z.string().optional().describe("Filesystem path where the mirror tree gets written. If omitted, defaults to '<projectDir>/mcp-mirror'. Created automatically if missing; existing files at the same paths are overwritten."),
+      mirrorRoot: z.string().optional().describe("Filesystem path where the mirror tree gets written. If omitted, defaults to '<projectDir>/mcp-mirror' (or '<projectDir>/<projectname>_mcp_mirror' when several .project files share the parent dir). Created automatically if missing; existing files at the same paths are overwritten."),
     },
     async (args: { projectFilePath: string; mirrorRoot?: string }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
       const mirrorRoot = args.mirrorRoot
         ? resolvePath(args.mirrorRoot, workspaceDir)
-        : path.join(path.dirname(escaped), 'mcp-mirror');
+        : resolveMirrorRoot(escaped);
       const script = scriptManager.prepareScriptWithHelpers(
         'mirror_export',
         {
