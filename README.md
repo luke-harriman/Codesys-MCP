@@ -88,7 +88,6 @@ See [Installation](#installation) for source-install / upgrade / multi-install s
 - **`bump_project_version`** — bumps one part of the 4-part `Project Information.Version` (major / minor / revision / build / **auto**) and maintains a `_MCP_PROJECT_VERSION` GVL inside the project so the running PLC carries its source version. `auto` mode classifies via mirror diff vs the latest `v*` git tag (deletion/rename → major; addition → minor; modification → revision; first-run → seed at 1.0.0.0). Auto-maintains `Changelog.md` alongside the bump.
 - **`release_project_version`** — one-shot release pipeline: `mirror_export` → classify → `bump_project_version` → regenerate library.md/pou-dump.md/README.md/Changelog.md → `git add` controlled paths → `git commit` → `git tag v<new>` → `git push --follow-tags`. Tag annotation embeds dual SHAs (project-sha256 + mirror-sha256) so the binary-changed-without-source-diff case still gets a build-bump with provenance.
 - **`read_running_version_online`** — reads `_MCP_PROJECT_VERSION.sVersion` from the running PLC over the CODESYS online protocol (port 11740 / gateway). Returns the live value plus a sanity check against the X.Y.Z.W shape.
-- **`git_remote_add`**, **`git_branch_set_upstream_to`**, **`git_push`** — wrappers for the CODESYS Git plugin's remote/upstream/push primitives that upstream didn't ship. `git_branch_set_upstream_to` is **mandatory before the first push to a fresh remote** — without it `git_push` fails with "branch does not track an upstream branch".
 
 ### Reliability fixes
 
@@ -106,7 +105,7 @@ The verified state of every tool is recorded in [`docs/SMOKE-TEST-2026-04-25.md`
 
 This is a Node.js MCP server published to npm as **`codesys-mcp-sp21-plus`**. It is **this fork** — not the upstream `luke-harriman/Codesys-MCP` and not a Python package. There is no `pip install`; the `.py` files under `src/scripts/` are CODESYS IronPython templates bundled inside the npm package itself.
 
-**Requirements:** Node.js 18+, Windows, CODESYS 3.5 SP19, SP21 (3.5.21.x), or SP22 (3.5.22.x) installed. The CODESYS Git plugin tools (`git_init`, `git_commit`, `git_push`, etc.) additionally require an active **CODESYS Professional Developer Edition** subscription license.
+**Requirements:** Node.js 18+, Windows, CODESYS 3.5 SP19, SP21 (3.5.21.x), or SP22 (3.5.22.x) installed.
 
 ### Install from npm (recommended)
 
@@ -240,7 +239,7 @@ Environment variables `CODESYS_PATH` and `CODESYS_PROFILE` are used as defaults 
 
 ## MCP Tools
 
-37 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
+31 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
 
 ### Management Tools
 
@@ -309,19 +308,6 @@ These tools maintain a `_MCP_PROJECT_VERSION` GVL inside the project so the runn
 | Tool | Description |
 |------|-------------|
 | `mirror_export` | **NEW** — Walks the project tree and writes one `.st` file per code-bearing object into `<projectDir>/mcp-mirror/`, preserving the project tree as nested directories. Read-only. Foundation for the release pipeline classifier |
-
-### CODESYS Git (PDE license-gated)
-
-These tools wrap CODESYS's own Git plugin. **All of them require an active CODESYS Professional Developer Edition subscription license** — without it, the runtime's `HasGitLicense` rule fails fast with a clear PDE-required message. Distinct from the orchestration-level git operations baked into `release_project_version` (which use the system `git` binary and don't need PDE).
-
-| Tool | Description |
-|------|-------------|
-| `git_init` | Initialise a Git working tree via `project.git.init()`. Dual-storage model: the `.project` stays where it is; the git repo lives in a SEPARATE directory (auto-defaults to `<basename>_git` sibling). Pass an explicit `localRepoPath` on a local drive when the project lives on a network share — UNC paths are rejected by the plugin |
-| `git_status` | Reports current branch + a probe of any status/changes/diff methods exposed on `project.git`. Read-only |
-| `git_commit` | Stages all working-tree changes and commits via `project.git.commit_complete(message, user, mail)` |
-| `git_remote_add` | **NEW** — Adds a named remote via `project.git.remote_add(name, url)` |
-| `git_branch_set_upstream_to` | **NEW** — Sets the current branch's upstream tracking ref. **Mandatory before the first push to a fresh remote** |
-| `git_push` | **NEW** — Pushes the current branch via `project.git.push()`. If `username + token` are both supplied, uses the 3-arg overload; otherwise relies on cached credentials / Windows Credential Manager. **Security: when a token is supplied, it is briefly resident in the watcher's command file on disk — prefer cached credentials.** |
 
 ## MCP Resources
 
@@ -410,7 +396,7 @@ npm run test:watch
 ```
 src/
   bin.ts              CLI entry point
-  server.ts           MCP tool/resource registration (37 tools, 3 resources)
+  server.ts           MCP tool/resource registration (31 tools, 3 resources)
   launcher.ts         CODESYS process management
   ipc.ts              File-based IPC transport
   headless.ts         Headless fallback executor
@@ -427,7 +413,7 @@ tests/
 ## Credits
 
 - Upstream project: [luke-harriman/Codesys-MCP](https://github.com/luke-harriman/Codesys-MCP) — original architecture, the persistent-watcher concept, and the bulk of the upstream tool set
-- This fork: [phobicdotno/Codesys-MCP-SP21-plus](https://github.com/phobicdotno/Codesys-MCP-SP21-plus) — Karstein Kvistad. SP21+/SP22 watcher rewrite, upstream-tool fixes, version-anchor + release pipeline, source-mirror export, CODESYS Git push wrappers
+- This fork: [phobicdotno/Codesys-MCP-SP21-plus](https://github.com/phobicdotno/Codesys-MCP-SP21-plus) — Karstein Kvistad. SP21+/SP22 watcher rewrite, upstream-tool fixes, version-anchor + release pipeline, source-mirror export
 
 ## License
 
