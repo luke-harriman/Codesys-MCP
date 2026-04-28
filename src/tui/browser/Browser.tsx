@@ -10,6 +10,7 @@ export interface BrowserProps {
   readPou: (pou: POU) => Promise<string>;
   writeSelection: (s: Selection) => void;
   onQuit: () => void;
+  onRescan?: () => void;
 }
 
 interface FlatRow {
@@ -31,7 +32,7 @@ function flatten(project: Project, expanded: Set<string>): FlatRow[] {
   return rows;
 }
 
-export function Browser({ project, readPou, writeSelection, onQuit }: BrowserProps): React.ReactElement {
+export function Browser({ project, readPou, writeSelection, onQuit, onRescan }: BrowserProps): React.ReactElement {
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [cursorIdx, setCursorIdx] = React.useState(0);
   const [text, setText] = React.useState<string | null>(null);
@@ -73,6 +74,7 @@ export function Browser({ project, readPou, writeSelection, onQuit }: BrowserPro
       return;
     }
     if (input === 'q') return onQuit();
+    if (input === 'r' && onRescan) return onRescan();
     if (input === 'j' || key.downArrow) {
       setCursorIdx((i) => Math.min(i + 1, rows.length - 1));
     } else if (input === 'k' || key.upArrow) {
@@ -116,7 +118,7 @@ export function Browser({ project, readPou, writeSelection, onQuit }: BrowserPro
           <Viewer pou={cursor?.pou ?? null} text={text} scrollTop={scrollTop} visibleRows={20} />
         </Box>
       </Box>
-      <Text>j/k nav  l expand  h collapse  ? help  q quit</Text>
+      <Text>j/k nav  l expand  h collapse  r rescan  ? help  q quit</Text>
     </Box>
   );
 }
@@ -129,6 +131,7 @@ function HelpOverlay(): React.ReactElement {
       <Text>  k / ↑     move cursor up</Text>
       <Text>  l / →     expand device</Text>
       <Text>  h / ←     collapse device</Text>
+      <Text>  r         re-scan mcp-mirror/</Text>
       <Text>  ?         toggle this help</Text>
       <Text>  Esc       close help</Text>
       <Text>  q         quit</Text>

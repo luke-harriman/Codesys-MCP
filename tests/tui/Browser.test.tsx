@@ -99,6 +99,23 @@ describe('<Browser>', () => {
     expect(lastFrame()).not.toContain('Keybindings');
   });
 
+  it('calls onRescan on r', async () => {
+    const onRescan = vi.fn();
+    const { stdin } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+        onRescan={onRescan}
+      />
+    );
+    await flush();
+    stdin.write('r');
+    await flush();
+    expect(onRescan).toHaveBeenCalled();
+  });
+
   it('closes the help overlay on Esc', async () => {
     const { stdin, lastFrame } = render(
       <Browser

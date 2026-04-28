@@ -51,12 +51,29 @@ async function runBrowser(maybeRoot: string | undefined): Promise<number> {
       resolve(0);
     };
     const readPou = (pou: { absPath: string }) => fs.readFile(pou.absPath, 'utf8');
+    const onRescan = async () => {
+      try {
+        const next = await walk(root);
+        app.rerender(
+          <Browser
+            project={next}
+            readPou={readPou}
+            writeSelection={onWriteSelection}
+            onQuit={onQuit}
+            onRescan={onRescan}
+          />
+        );
+      } catch (err) {
+        process.stderr.write(`phobiCS-tui: rescan failed: ${(err as Error).message}\n`);
+      }
+    };
     const app = render(
       <Browser
         project={project!}
         readPou={readPou}
         writeSelection={onWriteSelection}
         onQuit={onQuit}
+        onRescan={onRescan}
       />
     );
   });
