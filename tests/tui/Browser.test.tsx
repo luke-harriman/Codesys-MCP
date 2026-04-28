@@ -99,6 +99,44 @@ describe('<Browser>', () => {
     expect(lastFrame()).not.toContain('Keybindings');
   });
 
+  it('calls onOpenInEditor on o with the highlighted POU absPath', async () => {
+    const onOpenInEditor = vi.fn();
+    const { stdin } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+        onOpenInEditor={onOpenInEditor}
+      />
+    );
+    await flush();
+    stdin.write('l');
+    await flush();
+    stdin.write('j');
+    await flush();
+    stdin.write('o');
+    await flush();
+    expect(onOpenInEditor).toHaveBeenCalledWith('/abs/PLC_PRG.st');
+  });
+
+  it('does not call onOpenInEditor when cursor is on a device row', async () => {
+    const onOpenInEditor = vi.fn();
+    const { stdin } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+        onOpenInEditor={onOpenInEditor}
+      />
+    );
+    await flush();
+    stdin.write('o');
+    await flush();
+    expect(onOpenInEditor).not.toHaveBeenCalled();
+  });
+
   it('calls onRescan on r', async () => {
     const onRescan = vi.fn();
     const { stdin } = render(

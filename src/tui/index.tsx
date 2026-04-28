@@ -1,6 +1,7 @@
 import React from 'react';
 import { render } from 'ink';
 import * as fs from 'fs/promises';
+import { spawn } from 'child_process';
 import { Approve, Decision } from './approve/Approve.js';
 import { Browser } from './browser/Browser.js';
 import { walk } from './shared/scan.js';
@@ -51,6 +52,15 @@ async function runBrowser(maybeRoot: string | undefined): Promise<number> {
       resolve(0);
     };
     const readPou = (pou: { absPath: string }) => fs.readFile(pou.absPath, 'utf8');
+    const onOpenInEditor = (absPath: string) => {
+      const editor = process.env.EDITOR || 'code';
+      try {
+        const child = spawn(editor, [absPath], { stdio: 'ignore', detached: true, shell: true });
+        child.unref();
+      } catch (err) {
+        process.stderr.write(`phobiCS-tui: open-in-editor failed: ${(err as Error).message}\n`);
+      }
+    };
     const onRescan = async () => {
       try {
         const next = await walk(root);
@@ -61,6 +71,7 @@ async function runBrowser(maybeRoot: string | undefined): Promise<number> {
             writeSelection={onWriteSelection}
             onQuit={onQuit}
             onRescan={onRescan}
+            onOpenInEditor={onOpenInEditor}
           />
         );
       } catch (err) {
@@ -74,6 +85,7 @@ async function runBrowser(maybeRoot: string | undefined): Promise<number> {
         writeSelection={onWriteSelection}
         onQuit={onQuit}
         onRescan={onRescan}
+        onOpenInEditor={onOpenInEditor}
       />
     );
   });
