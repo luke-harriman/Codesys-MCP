@@ -100,7 +100,7 @@ After that, watch VSCode's Source Control panel as Claude edits — every tool c
 
 ### Compatibility fixes (the headline)
 
-- **SP21+/SP22 compatibility.** The watcher was rewritten as single-threaded on the primary thread, yielding to the IDE via `system.delay()`. No background thread, no marshaling. Works on SP19, SP21, and SP22+. Full rationale in [`docs/MIGRATION-SP21-PLUS.md`](docs/MIGRATION-SP21-PLUS.md).
+- **SP21+/SP22 compatibility.** The watcher was rewritten as single-threaded on the primary thread, yielding to the IDE via `system.delay()`. No background thread, no marshaling. Works on SP19, SP21, and SP22+. Full rationale in [`docs/migration-sp21-plus.md`](docs/migration-sp21-plus.md).
 - **Cancel-link hardening.** The watcher now catches `KeyboardInterrupt` (which is not a subclass of `Exception` in IronPython 2.7) at three layers, so clicking *"Click here to CANCEL this operation"* in CODESYS no longer pops the modal traceback dialog or kills the watcher. `WATCHER_VERSION 0.4.2`.
 
 ### Upstream tool fixes
@@ -127,7 +127,7 @@ After that, watch VSCode's Source Control panel as Claude edits — every tool c
 
 ### Verification
 
-The verified state of every tool is recorded in [`docs/FUNCTION-TEST-2026-04-25.md`](docs/FUNCTION-TEST-2026-04-25.md) (and the 2026-04-28 re-verification in [`docs/FUNCTION-TEST-2026-04-28.md`](docs/FUNCTION-TEST-2026-04-28.md)). Open issues (mostly online-API drift) are tracked in [`docs/OPEN-BUGS-CROSS-REFERENCE.md`](docs/OPEN-BUGS-CROSS-REFERENCE.md).
+The verified state of every tool is recorded in [`docs/function-test-2026-04-25.md`](docs/function-test-2026-04-25.md) (and the 2026-04-28 re-verification in [`docs/function-test-2026-04-28.md`](docs/function-test-2026-04-28.md)). Open issues (mostly online-API drift) are tracked in [`docs/open-bugs-cross-reference.md`](docs/open-bugs-cross-reference.md).
 
 ---
 

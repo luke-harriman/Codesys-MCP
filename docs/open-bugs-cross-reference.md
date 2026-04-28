@@ -1,7 +1,7 @@
 # Open bugs -- cross-referenced against the official CODESYS scripting docs
 
 For each of the 5 remaining MCP tool bugs from
-[FUNCTION-TEST-2026-04-25.md](FUNCTION-TEST-2026-04-25.md), this document
+[function-test-2026-04-25.md](function-test-2026-04-25.md), this document
 records:
 
   1. The empirical failure observed locally on SP22 Patch 1.
