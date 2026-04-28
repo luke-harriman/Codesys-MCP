@@ -1401,21 +1401,26 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'rename_object',
-    'Renames a project object (POU, DUT, GVL, folder, etc.) in the CODESYS project.',
+    "Renames a project object (POU, DUT, GVL, folder, etc.) in the CODESYS project. By default also updates references in every other POU/DUT/GVL by word-boundary regex (\\bOldName\\b -> NewName) so the rename behaves like the IDE's Rename refactor. Pass updateReferences=false to opt out (keep the legacy minimal-rename behaviour, which leaves callers stale and breaks compilation when renaming a type/FB).",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       objectPath: z.string().describe("Full relative path to the object to rename (e.g., 'Application/MyPOU')."),
       newName: z.string().describe("New name for the object (must be a valid IEC identifier)."),
+      updateReferences: z.boolean().optional().describe("If true (default), regex-replace \\bOldName\\b -> NewName in every other POU/DUT/GVL declaration AND implementation. False: rename target only -- callers will be stale and the project may stop compiling."),
     },
-    async (args: { projectFilePath: string; objectPath: string; newName: string }) => {
+    async (args: { projectFilePath: string; objectPath: string; newName: string; updateReferences?: boolean }) => {
       const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
       const sanObjPath = sanitizePouPath(args.objectPath);
+      // Default updateReferences=true (the safer behaviour). Caller must
+      // explicitly pass false to disable.
+      const updateRefs = args.updateReferences === false ? false : true;
       const script = scriptManager.prepareScriptWithHelpers(
         'rename_object',
         {
           PROJECT_FILE_PATH: escProjPath,
           OBJECT_PATH: sanObjPath,
           NEW_NAME: args.newName.trim(),
+          UPDATE_REFERENCES: updateRefs ? '1' : '0',
         },
         ['ensure_project_open', 'find_object_by_path']
       );

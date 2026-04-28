@@ -164,6 +164,48 @@ describe('E2E Script Preparation', () => {
     expect(script).toContain('build()');
   });
 
+  it('rename_object script renders the references-update branch with UPDATE_REFERENCES=1', () => {
+    // Bug 5: rename_object historically only updated the target's own
+    // decl, not callers in other POUs. The fixed script must:
+    //   - default to project-wide identifier rewrite via word-boundary regex
+    //   - opt-out via UPDATE_REFERENCES=0
+    //   - import re and walk text-bearing nodes
+    const script = mgr.prepareScriptWithHelpers(
+      'rename_object',
+      {
+        PROJECT_FILE_PATH: 'C:\\test.project',
+        OBJECT_PATH: 'Application/ST_Sample',
+        NEW_NAME: 'ST_SampleRenamed',
+        UPDATE_REFERENCES: '1',
+      },
+      ['ensure_project_open', 'find_object_by_path']
+    );
+    expect(script).toContain('def find_object_by_path_robust');
+    expect(script).toContain('OBJECT_PATH = "Application/ST_Sample"');
+    expect(script).toContain('NEW_NAME = "ST_SampleRenamed"');
+    expect(script).toContain('UPDATE_REFERENCES = "1" == "1"');
+    expect(script).toContain('import sys, scriptengine as script_engine, os, traceback, re');
+    expect(script).toContain('re.escape(old_identifier)');
+    expect(script).toContain('textual_declaration');
+    expect(script).toContain('textual_implementation');
+    expect(script).not.toMatch(/\{[A-Z_]+\}/);
+  });
+
+  it('rename_object script honours UPDATE_REFERENCES=0 opt-out', () => {
+    const script = mgr.prepareScriptWithHelpers(
+      'rename_object',
+      {
+        PROJECT_FILE_PATH: 'C:\\test.project',
+        OBJECT_PATH: 'Application/Foo',
+        NEW_NAME: 'Bar',
+        UPDATE_REFERENCES: '0',
+      },
+      ['ensure_project_open', 'find_object_by_path']
+    );
+    expect(script).toContain('UPDATE_REFERENCES = "0" == "1"');
+    expect(script).not.toMatch(/\{[A-Z_]+\}/);
+  });
+
   it('all scripts are loadable', () => {
     const scriptNames = [
       'check_status', 'compile_project', 'create_method', 'create_pou',
