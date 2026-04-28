@@ -26,6 +26,7 @@ import { inspectProjectFile } from './inspect';
 import { parseProfileName } from './detect';
 import { decideOpenProjectPreflight } from './preflight';
 import { readSelection } from './state-read';
+import { runApproveGate } from './approve-gate';
 
 /**
  * Classifier for `bump_project_version --level=auto`.
@@ -1106,6 +1107,29 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      if (config.approveEdits) {
+        const gate = await runApproveGate({
+          projectFilePath: escProjPath,
+          pouPath: sanPouPath,
+          args: {
+            declarationCode: args.declarationCode,
+            implementationCode: args.implementationCode,
+          },
+        });
+        if (gate.status === 'rejected') {
+          return {
+            content: [{ type: 'text' as const, text: gate.message }],
+            isError: false,
+          };
+        }
+        if (gate.status === 'error') {
+          return {
+            content: [{ type: 'text' as const, text: `Approve gate error: ${gate.message}` }],
+            isError: true,
+          };
+        }
+        // 'accepted' or 'no-existing' → fall through and apply the change.
+      }
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
