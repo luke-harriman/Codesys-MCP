@@ -149,9 +149,19 @@ try:
             print("WARN: parent.add(types.IecFolder) raised: %s" % e)
 
     if new_folder is None:
+        # Total miss -- dump dir(parent) to surface what API surface this
+        # SP actually exposes, so the next iteration can target it. Helps
+        # OPEN-BUGS-CROSS-REFERENCE Bug 1 diagnosis on unexpected SPs.
+        try:
+            api_attrs = sorted([a for a in dir(parent_object) if not a.startswith('_')])
+            api_dump = ', '.join(api_attrs)
+        except Exception as de:
+            api_dump = '<dir() failed: %s>' % de
         raise TypeError(
-            "Parent object '%s' of type %s -- folder '%s' could not be created or located after trying %s." % (
-                parent_name, type(parent_object).__name__, FOLDER_NAME, ', '.join(strategies_tried) or '<no strategies available>'))
+            "Parent object '%s' of type %s -- folder '%s' could not be created or located after trying %s. parent api: %s" % (
+                parent_name, type(parent_object).__name__, FOLDER_NAME,
+                ', '.join(strategies_tried) or '<no strategies available>',
+                api_dump))
 
     if new_folder:
         new_folder_name = getattr(new_folder, 'get_name', lambda: FOLDER_NAME)()
