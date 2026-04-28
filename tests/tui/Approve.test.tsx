@@ -61,6 +61,33 @@ describe('<Approve>', () => {
     expect(decision).toHaveBeenCalledWith('reject');
   });
 
+  it('toggles to side-by-side on v and shows both halves', async () => {
+    const { stdin, lastFrame } = render(
+      <Approve fileName="x.st" oldText={OLD} newText={NEW} onDecision={() => {}} />
+    );
+    await flush();
+    expect(lastFrame()).not.toContain('│');
+    stdin.write('v');
+    await flush();
+    const out = lastFrame()!;
+    expect(out).toContain('│');
+    expect(out).toContain('counter : INT := 0;');
+    expect(out).toContain('counter : DINT := 0;');
+  });
+
+  it('toggles back to unified on a second v', async () => {
+    const { stdin, lastFrame } = render(
+      <Approve fileName="x.st" oldText={OLD} newText={NEW} onDecision={() => {}} />
+    );
+    await flush();
+    stdin.write('v');
+    await flush();
+    expect(lastFrame()).toContain('│');
+    stdin.write('v');
+    await flush();
+    expect(lastFrame()).not.toContain('│');
+  });
+
   it('calls onDecision("reject") on escape', async () => {
     const decision = vi.fn();
     const { stdin } = render(
