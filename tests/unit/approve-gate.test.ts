@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { composeMergedContent, IMPL_SENTINEL } from '../../src/approve-gate';
+import { describe, it, expect, vi } from 'vitest';
+import * as fs from 'fs/promises';
+import { composeMergedContent, IMPL_SENTINEL, runApproveGateOp } from '../../src/approve-gate';
 
 const existing = [
   'PROGRAM PLC_PRG',
@@ -45,5 +46,55 @@ describe('composeMergedContent', () => {
     });
     expect(out).toContain(IMPL_SENTINEL);
     expect(out).toContain('x := 1;');
+  });
+});
+
+describe('runApproveGateOp', () => {
+  it('writes before/after files and spawns the TUI with both paths', async () => {
+    const captured: { existing?: string; staged?: string } = {};
+    const spawnFn = vi.fn(async (existingPath: string, stagedPath: string) => {
+      captured.existing = existingPath;
+      captured.staged = stagedPath;
+      const oldText = await fs.readFile(existingPath, 'utf8');
+      const newText = await fs.readFile(stagedPath, 'utf8');
+      expect(oldText).toBe('OLD');
+      expect(newText).toBe('NEW');
+      return { status: 'accepted' as const };
+    });
+    const result = await runApproveGateOp({
+      slug: 'create-Application/MyFB',
+      oldText: 'OLD',
+      newText: 'NEW',
+      spawnFn,
+    });
+    expect(result.status).toBe('accepted');
+    expect(spawnFn).toHaveBeenCalledOnce();
+  });
+
+  it('passes the rejected status through', async () => {
+    const spawnFn = vi.fn(async () => ({
+      status: 'rejected' as const,
+      message: 'nope',
+    }));
+    const result = await runApproveGateOp({
+      slug: 'delete-Foo',
+      oldText: 'something',
+      newText: '',
+      spawnFn,
+    });
+    expect(result.status).toBe('rejected');
+  });
+
+  it('cleans up the temp dir after the spawn returns', async () => {
+    let dirSeen: string | undefined;
+    const spawnFn = vi.fn(async (existingPath: string) => {
+      dirSeen = existingPath.replace(/[\\/][^\\/]+$/, '');
+      // dir should exist while we're in here
+      await fs.access(dirSeen);
+      return { status: 'accepted' as const };
+    });
+    await runApproveGateOp({ slug: 'x', oldText: '', newText: 'Y', spawnFn });
+    // After: the dir must be gone
+    await expect(fs.access(dirSeen!)).rejects.toThrow();
   });
 });

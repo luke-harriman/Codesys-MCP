@@ -26,7 +26,7 @@ import { inspectProjectFile } from './inspect';
 import { parseProfileName } from './detect';
 import { decideOpenProjectPreflight } from './preflight';
 import { readSelection } from './state-read';
-import { runApproveGate } from './approve-gate';
+import { runApproveGate, gateOpForTool } from './approve-gate';
 
 /**
  * Classifier for `bump_project_version --level=auto`.
@@ -1046,6 +1046,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `create-pou-${sanParentPath.replace(/[/\\]/g, '_')}-${args.name}`,
+        oldText: '',
+        newText: `(* create POU *)\nname: ${args.name}\ntype: ${args.type}\nlanguage: ${args.language}\nparent: ${sanParentPath}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1162,6 +1169,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `create-property-${sanParentPath.replace(/[/\\]/g, '_')}-${args.propertyName}`,
+        oldText: '',
+        newText: `(* create Property *)\nname: ${args.propertyName}\ntype: ${args.propertyType}\nparent FB: ${sanParentPath}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1194,6 +1208,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `create-method-${sanParentPath.replace(/[/\\]/g, '_')}-${args.methodName}`,
+        oldText: '',
+        newText: `(* create Method *)\nname: ${args.methodName}\nreturn type: ${args.returnType ?? '(none)'}\nparent FB: ${sanParentPath}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1363,6 +1384,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `create-dut-${sanParentPath.replace(/[/\\]/g, '_')}-${args.name}`,
+        oldText: '',
+        newText: `(* create DUT *)\nname: ${args.name}\ntype: ${args.dutType}\nparent: ${sanParentPath}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1408,6 +1436,14 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `create-gvl-${sanParentPath.replace(/[/\\]/g, '_')}-${args.name}`,
+        oldText: '',
+        newText: `(* create GVL *)\nname: ${args.name}\nparent: ${sanParentPath}\n` +
+          (args.declarationCode ? `\nVAR_GLOBAL\n${args.declarationCode}\nEND_VAR\n` : ''),
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1438,6 +1474,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `create-folder-${sanParentPath.replace(/[/\\]/g, '_')}-${args.folderName}`,
+        oldText: '',
+        newText: `(* create Folder *)\nname: ${args.folderName}\nparent: ${sanParentPath}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1466,6 +1509,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `delete-${sanObjPath.replace(/[/\\]/g, '_')}`,
+        oldText: `(* DELETE *)\nobject: ${sanObjPath}\nproject: ${args.projectFilePath}\n`,
+        newText: '',
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1501,6 +1551,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `rename-${sanObjPath.replace(/[/\\]/g, '_')}`,
+        oldText: `(* old name *)\n${sanObjPath}\n`,
+        newText: `(* new name *)\n${sanObjPath.replace(/[^/\\]+$/, args.newName)}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1969,6 +2026,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `add-library-${args.libraryName.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
+        oldText: '',
+        newText: `(* add Library *)\nname: ${args.libraryName}\nproject: ${args.projectFilePath}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
