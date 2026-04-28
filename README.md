@@ -127,7 +127,7 @@ After that, watch VSCode's Source Control panel as Claude edits — every tool c
 
 ### Verification
 
-The verified state of every tool is recorded in [`docs/SMOKE-TEST-2026-04-25.md`](docs/SMOKE-TEST-2026-04-25.md). Open issues (mostly online-API drift) are tracked in [`docs/OPEN-BUGS-CROSS-REFERENCE.md`](docs/OPEN-BUGS-CROSS-REFERENCE.md).
+The verified state of every tool is recorded in [`docs/FUNCTION-TEST-2026-04-25.md`](docs/FUNCTION-TEST-2026-04-25.md) (and the 2026-04-28 re-verification in [`docs/FUNCTION-TEST-2026-04-28.md`](docs/FUNCTION-TEST-2026-04-28.md)). Open issues (mostly online-API drift) are tracked in [`docs/OPEN-BUGS-CROSS-REFERENCE.md`](docs/OPEN-BUGS-CROSS-REFERENCE.md).
 
 ---
 
