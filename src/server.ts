@@ -713,9 +713,12 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         }
       }
     } else {
-      // Launcher exists but not yet launched — will use headless until manually launched
+      // --no-auto-launch under persistent: launcher exists but isn't started.
+      // Keep executionMode = 'persistent' so get_codesys_status reflects the
+      // configured intent (State: stopped tells the user it isn't running).
+      // Tool calls before launch_codesys go through HeadlessExecutor as a
+      // best-effort fallback so the server stays useful.
       executor = new HeadlessExecutor(config);
-      executionMode = 'headless';
     }
   } else {
     executor = new HeadlessExecutor(config);
