@@ -1902,6 +1902,341 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // ─── Symbol Configuration Tools ───────────────────────────────────────
+  //
+  // Wraps ScriptSymbolConfigObject (since CODESYS 3.5.10.0). The Symbol
+  // Configuration object controls which IEC variables / FBs / methods are
+  // exposed to OPC UA, web visualisations, and other external clients.
+  // Reference: helpme-codesys.com/en/ScriptingEngine/ScriptSymbolConfigObject.html
+  // and SP22 stub Stubs/scriptengine/ScriptSymbolConfigObject.pyi.
+
+  // Bitmask members of SymbolConfigContentFeatureFlags (per the SP22 stub).
+  const CONTENT_FEATURE_FLAG_VALUES: Record<string, number> = {
+    None: 0,
+    SupportOPCUA: 1,
+    IncludeComments: 2,
+    IncludeAttributes: 4,
+    IncludeTypeNodeAttributes: 8,
+    IncludeExecutables: 16,
+    UseEmptyNamespaceByDefault: 32,
+    XmlIncludeNodeFlags: 1 << 16,
+    XmlIncludeComments: 2 << 16,
+    XmlIncludeAttributes: 4 << 16,
+    XmlIncludeTypeNodeAttributes: 8 << 16,
+    XmlIncludeExecutables: 16 << 16,
+  };
+
+  function combineContentFeatureFlags(names: string[] | undefined): number | null {
+    if (!names || names.length === 0) return null;
+    let bits = 0;
+    for (const n of names) {
+      const trimmed = n.trim();
+      if (!(trimmed in CONTENT_FEATURE_FLAG_VALUES)) {
+        throw new Error(
+          `Unknown contentFeatureFlag '${trimmed}'. Allowed: ${Object.keys(CONTENT_FEATURE_FLAG_VALUES).join(', ')}`
+        );
+      }
+      bits |= CONTENT_FEATURE_FLAG_VALUES[trimmed];
+    }
+    return bits;
+  }
+
+  const SYMCONF_HELPERS = ['ensure_project_open', 'find_symbol_config_object'];
+
+  s.tool(
+    'find_symbol_config',
+    "Locate the Symbol Configuration object(s) in a CODESYS project. Walks the project tree and reports every node where is_symbol_config==True (one per Application typically). Returns object name, slash-separated path, and id. If no Symbol Configuration exists, the tool returns count=0 and hints at create_symbol_config. Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'find_symbol_config',
+        { PROJECT_FILE_PATH: escaped },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, result.output);
+    }
+  );
+
+  s.tool(
+    'list_all_signatures',
+    "List every signature (POU / FunctionBlock / Method / Function) the Symbol Configuration could potentially export. Wraps ScriptSymbolConfigObject.get_all_signatures(compile=bool). Default compile=false returns the cached list (may be empty if the application has not been built since opening). Pass compile=true to force application.build() first -- authoritative but slow on large projects.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      compile: z.boolean().optional().describe("If true, build the application before generating the list (slow but authoritative). Default false uses the cached list."),
+    },
+    async (args: { projectFilePath: string; compile?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'list_all_signatures',
+        {
+          PROJECT_FILE_PATH: escaped,
+          COMPILE_FLAG: args.compile ? '1' : '0',
+        },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, result.output);
+    }
+  );
+
+  s.tool(
+    'list_all_datatypes',
+    "List every data type (struct / enum / alias / union) the Symbol Configuration could potentially export. Wraps ScriptSymbolConfigObject.get_all_datatypes(compile=bool). Same compile=true semantics as list_all_signatures.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      compile: z.boolean().optional().describe("If true, build the application before generating the list. Default false uses the cached list."),
+    },
+    async (args: { projectFilePath: string; compile?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'list_all_datatypes',
+        {
+          PROJECT_FILE_PATH: escaped,
+          COMPILE_FLAG: args.compile ? '1' : '0',
+        },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, result.output);
+    }
+  );
+
+  s.tool(
+    'list_configured_symbols',
+    "List the signatures + datatypes that are CURRENTLY configured for export by the Symbol Configuration (i.e. the user has ticked them in the IDE grid, or set_symbol_access has set their configured_access). For each variable: configured_access (what's set), maximal_access (the upper bound), effective_access (post-clamp), and exported_via_attribute (true if the export was driven by a {attribute 'symbol' := ...} pragma). Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'list_configured_symbols',
+        { PROJECT_FILE_PATH: escaped },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, result.output);
+    }
+  );
+
+  s.tool(
+    'get_symbol_config_settings',
+    "Read every knob on the Symbol Configuration object: content_feature_flags (OPC UA / IncludeComments / IncludeAttributes / IncludeExecutables / etc.), symbol_attribute_filter_type and _data, symbol_comment_filter_type, enable_direct_io_access (plus any obstacles that would block enabling it), and the client-side layout calculator. Both 'configured' and 'effective' values are reported where the API distinguishes them. Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'get_symbol_config_settings',
+        { PROJECT_FILE_PATH: escaped },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, result.output);
+    }
+  );
+
+  s.tool(
+    'create_symbol_config',
+    "Add a Symbol Configuration object under an Application. Wraps ScriptApplicationSymbolConfigExtension.create_symbol_config(export_comments_to_xml, support_opc_ua, layout_guid). IDEMPOTENT: if a Symbol Configuration already exists anywhere in the project tree, the tool no-ops with success and returns the existing object's path -- it does NOT add a duplicate. Saves the project on actual creation.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      applicationPath: z.string().optional().describe("Slash-separated path to the Application (e.g. 'CodesysRpi/Plc Logic/Application'), or just 'Application'. Empty/omitted = use the project's active application."),
+      exportCommentsToXml: z.boolean().optional().describe("Pass to the API's export_comments_to_xml flag. Default true."),
+      supportOpcUa: z.boolean().optional().describe("Pass to the API's support_opc_ua flag. Default true."),
+      layoutCalculator: z.enum(['compatibility', 'optimized']).optional().describe("Which client-side layout calculator to register. 'compatibility' (default) uses Guid.Empty (always available). 'optimized' uses {0141eb75-141b-4ea1-9a8c-75f952b22a6c} (V3.5.7.0+, requires compiler version 3.5.7.0+)."),
+    },
+    async (args: {
+      projectFilePath: string;
+      applicationPath?: string;
+      exportCommentsToXml?: boolean;
+      supportOpcUa?: boolean;
+      layoutCalculator?: 'compatibility' | 'optimized';
+    }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'create_symbol_config',
+        {
+          PROJECT_FILE_PATH: escaped,
+          APPLICATION_PATH: (args.applicationPath ?? '').trim(),
+          EXPORT_COMMENTS_TO_XML: args.exportCommentsToXml === false ? '0' : '1',
+          SUPPORT_OPC_UA: args.supportOpcUa === false ? '0' : '1',
+          LAYOUT_CALCULATOR: args.layoutCalculator ?? 'compatibility',
+        },
+        [...SYMCONF_HELPERS, 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(
+        result,
+        `Symbol Configuration ensured under '${args.applicationPath ?? '<active application>'}' in ${args.projectFilePath}.`,
+        escaped,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'set_symbol_config_settings',
+    "Partial-update of any subset of Symbol Configuration knobs. Only fields you supply are written; others are left alone. Saves the project after applying changes. Refuses to enable direct I/O access if check_effective_direct_io_access reports obstacles.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      contentFeatureFlags: z.array(z.string()).optional().describe("Bitmask members to combine into content_feature_flags. Allowed members: SupportOPCUA, IncludeComments, IncludeAttributes, IncludeTypeNodeAttributes, IncludeExecutables, UseEmptyNamespaceByDefault, XmlIncludeNodeFlags, XmlIncludeComments, XmlIncludeAttributes, XmlIncludeTypeNodeAttributes, XmlIncludeExecutables. Pass [] or omit to leave unchanged. Pass ['None'] to clear all flags."),
+      attributeFilterType: z.enum(['None', 'All', 'SimpleIdentifiers', 'Prefix', 'Regex']).optional().describe("symbol_attribute_filter_type. None disables, All matches every attribute, SimpleIdentifiers matches single IEC identifiers, Prefix/Regex use attributeFilterData."),
+      attributeFilterData: z.string().optional().describe("Filter pattern for attributeFilterType=Prefix or Regex. Ignored for None/All/SimpleIdentifiers."),
+      commentFilterType: z.enum(['None', 'NormalComments', 'DocuComments', 'Both', 'PreferNormalComments', 'PreferDocuComments']).optional().describe("symbol_comment_filter_type. NormalComments = // and (* *) only. DocuComments = /// only. Both = combine. Prefer* picks one with the other as fallback."),
+      enableDirectIoAccess: z.boolean().optional().describe("enable_direct_io_access. Refused if obstacles exist (compiler version too old, or symbol config is configured as a child object)."),
+      layoutCalculator: z.enum(['compatibility', 'optimized']).optional().describe("Which client-side layout calculator GUID to set."),
+    },
+    async (args: {
+      projectFilePath: string;
+      contentFeatureFlags?: string[];
+      attributeFilterType?: 'None' | 'All' | 'SimpleIdentifiers' | 'Prefix' | 'Regex';
+      attributeFilterData?: string;
+      commentFilterType?: 'None' | 'NormalComments' | 'DocuComments' | 'Both' | 'PreferNormalComments' | 'PreferDocuComments';
+      enableDirectIoAccess?: boolean;
+      layoutCalculator?: 'compatibility' | 'optimized';
+    }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+
+      const cffInt = combineContentFeatureFlags(args.contentFeatureFlags);
+      const applyContentFlags = cffInt !== null;
+
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_symbol_config_settings',
+        {
+          PROJECT_FILE_PATH: escaped,
+          APPLY_CONTENT_FLAGS: applyContentFlags ? '1' : '0',
+          CONTENT_FLAGS_INT: applyContentFlags ? String(cffInt) : '0',
+          APPLY_ATTR_FILTER_TYPE: args.attributeFilterType !== undefined ? '1' : '0',
+          ATTR_FILTER_TYPE: args.attributeFilterType ?? 'None',
+          APPLY_ATTR_FILTER_DATA: args.attributeFilterData !== undefined ? '1' : '0',
+          ATTR_FILTER_DATA: args.attributeFilterData ?? '',
+          APPLY_COMMENT_FILTER_TYPE: args.commentFilterType !== undefined ? '1' : '0',
+          COMMENT_FILTER_TYPE: args.commentFilterType ?? 'None',
+          APPLY_DIRECT_IO: args.enableDirectIoAccess !== undefined ? '1' : '0',
+          DIRECT_IO: args.enableDirectIoAccess ? '1' : '0',
+          APPLY_LAYOUT: args.layoutCalculator !== undefined ? '1' : '0',
+          LAYOUT_CALCULATOR: args.layoutCalculator ?? 'compatibility',
+        },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(
+        result,
+        `Symbol Configuration settings updated for ${args.projectFilePath}.`,
+        escaped,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'set_symbol_access',
+    "Set the configured_access for a single variable inside one signature. Locates the signature by full-qualified name (FQN), e.g. 'Application.PLC_PRG'. If the signature isn't yet in the configured set the tool tries the all-signatures view too -- so you can use this to TICK a not-yet-exported variable. Saves the project.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      signatureFqn: z.string().describe("Full-qualified name of the signature, e.g. 'Application.PLC_PRG' or 'Standard.TON'."),
+      variableName: z.string().describe("The variable's name as it appears in sig.variables, e.g. 'nCounter'."),
+      access: z.enum(['None', 'ReadOnly', 'WriteOnly', 'ReadWrite']).describe("Desired access. None=hide. ReadOnly=expose for read. WriteOnly=expose for write. ReadWrite=both."),
+      libraryId: z.string().optional().describe("Optional library_id to disambiguate when the FQN exists in multiple namespaces."),
+    },
+    async (args: {
+      projectFilePath: string;
+      signatureFqn: string;
+      variableName: string;
+      access: 'None' | 'ReadOnly' | 'WriteOnly' | 'ReadWrite';
+      libraryId?: string;
+    }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_symbol_access',
+        {
+          PROJECT_FILE_PATH: escaped,
+          SIGNATURE_FQN: args.signatureFqn,
+          VARIABLE_NAME: args.variableName,
+          ACCESS: args.access,
+          LIBRARY_ID: args.libraryId ?? '',
+          ENSURE_CONFIGURED: '1',
+        },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(
+        result,
+        `Symbol access set: ${args.signatureFqn}.${args.variableName} = ${args.access}.`,
+        escaped,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'set_signature_access_bulk',
+    "Set configured_access for EVERY variable inside a signature to the same value. Variables whose maximal_access doesn't permit the requested level are skipped (reported in the response). Useful for 'expose all of PLC_PRG as ReadWrite' in one shot.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      signatureFqn: z.string().describe("Full-qualified name of the signature, e.g. 'Application.PLC_PRG'."),
+      access: z.enum(['None', 'ReadOnly', 'WriteOnly', 'ReadWrite']).describe("Access level to apply to every variable."),
+      libraryId: z.string().optional().describe("Optional library_id to disambiguate."),
+    },
+    async (args: {
+      projectFilePath: string;
+      signatureFqn: string;
+      access: 'None' | 'ReadOnly' | 'WriteOnly' | 'ReadWrite';
+      libraryId?: string;
+    }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_signature_access_bulk',
+        {
+          PROJECT_FILE_PATH: escaped,
+          SIGNATURE_FQN: args.signatureFqn,
+          ACCESS: args.access,
+          LIBRARY_ID: args.libraryId ?? '',
+        },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(
+        result,
+        `Signature ${args.signatureFqn} bulk access set to ${args.access}.`,
+        escaped,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'export_symbol_xsd',
+    "Write the Symbol Configuration XSD schema (the bytes returned by get_symbol_configuration_xsd()) to a file. The schema describes the XML the runtime emits at download. Use it to validate downstream symbol XML in CI. Refuses if the parent directory of outputFilePath doesn't exist.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      outputFilePath: z.string().describe("Where to write the XSD bytes (UTF-8). Parent directory must exist."),
+    },
+    async (args: { projectFilePath: string; outputFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const outEscaped = resolvePath(args.outputFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'export_symbol_xsd',
+        {
+          PROJECT_FILE_PATH: escaped,
+          OUTPUT_FILE_PATH: outEscaped,
+        },
+        SYMCONF_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(
+        result,
+        `Symbol Configuration XSD written to ${args.outputFilePath}.`
+      );
+    }
+  );
+
   // ─── Project metadata ────────────────────────────────────────────────
 
   s.tool(
