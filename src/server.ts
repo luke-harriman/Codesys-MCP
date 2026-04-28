@@ -726,6 +726,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   serverLog.info(`Starting CODESYS Persistent MCP Server v0.1.0`);
   serverLog.info(`Mode: ${config.mode}`);
+  serverLog.info(`Approve edits: ${config.approveEdits ? 'ON' : 'off'}`);
   serverLog.info(`CODESYS Path: ${config.codesysPath}`);
   serverLog.info(`Profile: ${config.profileName}`);
   serverLog.info(`Workspace: ${config.workspaceDir}`);
