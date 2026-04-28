@@ -41,6 +41,8 @@ import sys, scriptengine as script_engine, os, traceback
 #      bricking the next open.
 
 LIBRARY_NAME = "{LIBRARY_NAME}"
+USE_DIRECT = "{USE_DIRECT}" == "1"
+FORCE_DUP = "{FORCE_DUP}" == "1"
 
 
 def _resolve_in_repo(name):
@@ -190,6 +192,26 @@ try:
 
     print("DEBUG: Library Manager found: %s" % getattr(lib_manager, 'get_name', lambda: '?')())
 
+    # Step 0 (NEW per OPEN-BUGS-CROSS-REFERENCE Bug 4): dedup pre-check.
+    # If a reference with the same bare name already exists (whether
+    # placeholder or managed), no-op with a confirmation message rather
+    # than silently creating a duplicate. Bypass with FORCE_DUP=1.
+    existing_ref = _find_added_reference(lib_manager, LIBRARY_NAME)
+    if existing_ref is not None and not FORCE_DUP:
+        existing_name = getattr(existing_ref, 'name', '?')
+        is_ph = bool(getattr(existing_ref, 'is_placeholder', False))
+        kind = "placeholder" if is_ph else "managed"
+        msg = ("Library '%s' is already referenced (%s, name=%r). "
+               "No-op (use force=true to add another reference)."
+               % (LIBRARY_NAME, kind, existing_name))
+        print(msg)
+        print("Library Already Present: %s" % LIBRARY_NAME)
+        print("Project: %s" % project_name)
+        print("SCRIPT_SUCCESS: %s" % msg)
+        sys.exit(0)
+    if existing_ref is not None and FORCE_DUP:
+        print("DEBUG: dedup pre-check found existing reference for '%s' but FORCE_DUP=1 -- adding duplicate." % LIBRARY_NAME)
+
     # Step 1: pre-resolve the library name against the installed repository.
     # If found, we will pass the ManagedLib to add_library() to get a
     # MANAGED reference instead of a placeholder reference.
@@ -203,32 +225,70 @@ try:
     else:
         print("DEBUG: Pre-resolve via library_manager.find_library returned no hit for '%s'." % LIBRARY_NAME)
 
-    # Step 2: add the reference, preferring the managed overload.
+    # Step 2: add the reference. Default is add_placeholder() to match the
+    # modern '<Name>, * (System)' convention (placeholder resolves at
+    # compile time so transitive deps stay flexible). USE_DIRECT=1 opts
+    # into the legacy direct add_library() path (specific-version pin).
+    # Per docs: ScriptLibManObject exposes BOTH add_library(...) and
+    # add_placeholder(...) -- see helpme-codesys.com/ScriptLibManObject.
     added = False
     add_attempt_errors = []
 
-    if resolved_lib is not None and hasattr(lib_manager, 'add_library'):
+    if not USE_DIRECT and hasattr(lib_manager, 'add_placeholder'):
+        # Default branch: placeholder add. Try (name, default_resolution)
+        # then (name) -- the default_resolution arg lets the IDE record
+        # which managed lib the placeholder should resolve to.
         try:
-            lib_manager.add_library(resolved_lib)
-            added = True
-            print("DEBUG: add_library(ManagedLib) succeeded.")
+            if resolved_lib is not None:
+                try:
+                    lib_manager.add_placeholder(LIBRARY_NAME, resolved_lib)
+                    added = True
+                    print("DEBUG: add_placeholder(name, ManagedLib) succeeded.")
+                except Exception as e_pm:
+                    add_attempt_errors.append("add_placeholder(name, ManagedLib): %s" % e_pm)
+                    print("DEBUG: add_placeholder(name, ManagedLib) failed: %s" % e_pm)
+            if not added:
+                lib_manager.add_placeholder(LIBRARY_NAME)
+                added = True
+                print("DEBUG: add_placeholder(name) succeeded.")
         except Exception as e:
-            add_attempt_errors.append("add_library(ManagedLib): %s" % e)
-            print("DEBUG: add_library(ManagedLib) failed: %s" % e)
+            add_attempt_errors.append("add_placeholder(name): %s" % e)
+            print("DEBUG: add_placeholder(name) failed: %s" % e)
 
+    # Direct add_library path -- explicit opt-in OR fallback if the IDE
+    # doesn't expose add_placeholder.
     if not added and hasattr(lib_manager, 'add_library'):
-        try:
-            lib_manager.add_library(LIBRARY_NAME)
-            added = True
-            print("DEBUG: add_library(name) succeeded (placeholder overload).")
-        except Exception as e:
-            add_attempt_errors.append("add_library(name): %s" % e)
-            print("DEBUG: add_library(name) failed: %s" % e)
+        if resolved_lib is not None:
+            try:
+                lib_manager.add_library(resolved_lib)
+                added = True
+                print("DEBUG: add_library(ManagedLib) succeeded.")
+            except Exception as e:
+                add_attempt_errors.append("add_library(ManagedLib): %s" % e)
+                print("DEBUG: add_library(ManagedLib) failed: %s" % e)
+        if not added:
+            try:
+                lib_manager.add_library(LIBRARY_NAME)
+                added = True
+                print("DEBUG: add_library(name) succeeded (placeholder overload).")
+            except Exception as e:
+                add_attempt_errors.append("add_library(name): %s" % e)
+                print("DEBUG: add_library(name) failed: %s" % e)
 
     if not added:
+        # Per Bug 4 step 3: detect partial-success state. Neither
+        # add_library nor add_placeholder is exposed -- emit a clear
+        # error rather than silent-failing.
+        api_attrs = []
+        try:
+            api_attrs = sorted([a for a in dir(lib_manager) if not a.startswith('_')])
+        except Exception:
+            pass
         raise RuntimeError(
-            "Could not add library '%s'. add_library overloads failed: %s"
-            % (LIBRARY_NAME, "; ".join(add_attempt_errors) or "no add_library on libman"))
+            "Could not add library '%s'. Add overloads failed: %s. lm api: %s"
+            % (LIBRARY_NAME,
+               "; ".join(add_attempt_errors) or "neither add_library nor add_placeholder on libman",
+               ', '.join(api_attrs) if api_attrs else '<dir() empty>'))
 
     # Step 3: verify the just-added reference actually resolved. If it did
     # not, REMOVE it and refuse to save -- saving an unresolvable

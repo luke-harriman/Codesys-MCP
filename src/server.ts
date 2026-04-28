@@ -1854,18 +1854,22 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'add_library',
-    'Adds a library reference to the CODESYS project. The library must be installed in the CODESYS library repository.',
+    "Adds a library reference to the CODESYS project. By default uses add_placeholder() to match the modern '<Name>, * (System)' convention so transitive deps resolve at compile time -- pass direct=true to opt into the legacy direct add_library() (specific version pin). Pre-checks lm.references for an existing reference with the same name and no-ops with a confirmation message unless force=true. The library must be installed in the CODESYS library repository.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       libraryName: z.string().describe("Name of the library to add (e.g., 'Standard', 'Util', 'CAA Memory')."),
+      direct: z.boolean().optional().describe("If true, use direct add_library() (specific-version pin) instead of the default add_placeholder() (resolves at compile)."),
+      force: z.boolean().optional().describe("If true, add even if a reference with the same name already exists (creates a duplicate). Default: dedup -- silently no-op with a confirmation message."),
     },
-    async (args: { projectFilePath: string; libraryName: string }) => {
+    async (args: { projectFilePath: string; libraryName: string; direct?: boolean; force?: boolean }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
       const script = scriptManager.prepareScriptWithHelpers(
         'add_library',
         {
           PROJECT_FILE_PATH: escaped,
           LIBRARY_NAME: args.libraryName.trim(),
+          USE_DIRECT: args.direct ? '1' : '0',
+          FORCE_DUP: args.force ? '1' : '0',
         },
         ['ensure_project_open']
       );

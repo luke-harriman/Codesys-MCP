@@ -111,6 +111,8 @@ describe('E2E Script Preparation', () => {
       {
         PROJECT_FILE_PATH: 'C:\\test.project',
         LIBRARY_NAME: 'Util',
+        USE_DIRECT: '0',
+        FORCE_DUP: '0',
       },
       ['ensure_project_open']
     );
@@ -118,8 +120,13 @@ describe('E2E Script Preparation', () => {
     // Pre-resolve via the IDE-level library_manager
     expect(script).toContain('library_manager');
     expect(script).toContain('find_library');
-    // Managed-overload preference
+    // Managed-overload preference (when USE_DIRECT=1 or add_placeholder unavailable)
     expect(script).toContain('add_library(resolved_lib)');
+    // Default-to-placeholder branch added per Bug 4
+    expect(script).toContain('add_placeholder');
+    // Dedup pre-check added per Bug 4
+    expect(script).toContain('FORCE_DUP');
+    expect(script).toContain('Library Already Present');
     // Post-add resolution gate
     expect(script).toContain('effective_resolution');
     expect(script).toContain('is_placeholder');
