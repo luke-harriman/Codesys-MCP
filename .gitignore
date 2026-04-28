@@ -23,3 +23,6 @@ __pycache__/
 .mcp.json
 .claude/
 CLAUDE.md
+
+# Git worktrees (isolated feature workspaces)
+.worktrees/
