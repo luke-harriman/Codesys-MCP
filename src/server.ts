@@ -1970,12 +1970,14 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         ['ensure_project_open']
       );
       const result = await executor.executeScript(script);
-      return await formatModifyingResponse(
-        result,
-        `Library '${args.libraryName}' added to ${args.projectFilePath}. Project saved.`,
-        escaped,
-        mirrorCtx
-      );
+      // Pick wording from the script's branch (dedup vs add) instead of
+      // always saying "added" -- script emits "Library Already Present"
+      // on the dedup no-op path and "Library Added" on actual add.
+      const dedupHit = result.output.includes('Library Already Present:');
+      const successMessage = dedupHit
+        ? `Library '${args.libraryName}' already referenced in ${args.projectFilePath}. No-op (use force=true to add a duplicate).`
+        : `Library '${args.libraryName}' added to ${args.projectFilePath}. Project saved.`;
+      return await formatModifyingResponse(result, successMessage, escaped, mirrorCtx);
     }
   );
 
