@@ -40,6 +40,25 @@ def atomic_write(file_path, content):
     os.rename(tmp_path, file_path)
 
 
+def read_with_retry(path, attempts=10, delay=0.02):
+    """Read a file with retries on PermissionError.
+
+    On Windows the renamed file can be briefly locked by Defender / NTFS
+    finalization, producing a transient PermissionError. Retry a few times
+    with a small sleep before giving up.
+    """
+    last = None
+    for _ in range(attempts):
+        try:
+            with open(path, "r") as f:
+                return f.read()
+        except (IOError, OSError) as e:
+            # PermissionError is OSError on py3, IOError on py2
+            last = e
+            time.sleep(delay)
+    raise last
+
+
 def process_command(commands_dir, results_dir, command_file):
     """Process a single .command.json file."""
     command_path = os.path.join(commands_dir, command_file)
@@ -51,16 +70,14 @@ def process_command(commands_dir, results_dir, command_file):
     error = ""
 
     try:
-        with open(command_path, "r") as f:
-            command_data = json.loads(f.read())
+        command_data = json.loads(read_with_retry(command_path))
 
         script_path = command_data.get("scriptPath", "")
 
         if not os.path.exists(script_path):
             raise IOError("Script file not found: %s" % script_path)
 
-        with open(script_path, "r") as f:
-            script_code = f.read()
+        script_code = read_with_retry(script_path)
 
         # Capture stdout/stderr
         old_stdout = sys.stdout
