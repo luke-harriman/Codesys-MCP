@@ -25,6 +25,8 @@ import { resolveMirrorRoot } from './mirror-paths';
 import { inspectProjectFile } from './inspect';
 import { parseProfileName } from './detect';
 import { decideOpenProjectPreflight } from './preflight';
+import { readSelection } from './state-read';
+import { runApproveGate } from './approve-gate';
 
 /**
  * Classifier for `bump_project_version --level=auto`.
@@ -673,6 +675,51 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+export async function buildGetUserSelectionResponse(stateFilePath: string) {
+  const r = await readSelection(stateFilePath);
+  if (r.status === 'ok') {
+    const lines = [
+      `User is currently looking at:`,
+      `  Device:  ${r.payload.device}`,
+      `  POU:     ${r.payload.selection.name} (${r.payload.selection.kind})`,
+      `  Path:    ${r.payload.selection.path}`,
+      `  AbsPath: ${r.payload.selection.abs_path}`,
+      `  Project: ${r.payload.project_dir}`,
+      `  Viewer line: ${r.payload.viewer_line}`,
+      `  Updated: ${r.payload.updated_at}`,
+    ];
+    return { content: [{ type: 'text' as const, text: lines.join('\n') }], isError: false };
+  }
+  if (r.status === 'invalid') {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Invalid TUI state file: ${r.reason}. No active selection.`,
+        },
+      ],
+      isError: false,
+    };
+  }
+  return {
+    content: [{ type: 'text' as const, text: 'No active selection (TUI not running or stale).' }],
+    isError: false,
+  };
+}
+
+function defaultStateFilePath(): string {
+  if (process.platform === 'win32') {
+    const localAppData = process.env.LOCALAPPDATA;
+    if (!localAppData) {
+      return path.join(os.homedir(), 'AppData', 'Local', 'codesys-mcp', 'tui-state.json');
+    }
+    return path.join(localAppData, 'codesys-mcp', 'tui-state.json');
+  }
+  const xdg = process.env.XDG_STATE_HOME;
+  const base = xdg ?? path.join(os.homedir(), '.local', 'state');
+  return path.join(base, 'codesys-mcp', 'tui-state.json');
+}
+
 export async function startMcpServer(config: ServerConfig): Promise<void> {
   // Set log level
   if (config.debug) setLogLevel('debug');
@@ -680,6 +727,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   serverLog.info(`Starting CODESYS Persistent MCP Server v0.1.0`);
   serverLog.info(`Mode: ${config.mode}`);
+  serverLog.info(`Approve edits: ${config.approveEdits ? 'ON' : 'off'}`);
   serverLog.info(`CODESYS Path: ${config.codesysPath}`);
   serverLog.info(`Profile: ${config.profileName}`);
   serverLog.info(`Workspace: ${config.workspaceDir}`);
@@ -843,6 +891,12 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         isError: false,
       };
     }
+  );
+
+  s.tool(
+    'get_user_selection',
+    'Get the POU the user is currently looking at in the phobiCS-tui browser, if any. Returns a freshness-checked snapshot from the TUI state file. Useful for grounding modifying tool calls in what the user has selected.',
+    async () => buildGetUserSelectionResponse(defaultStateFilePath())
   );
 
   // ─── Project Tools ───────────────────────────────────────────────────
@@ -1053,6 +1107,29 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
+      if (config.approveEdits) {
+        const gate = await runApproveGate({
+          projectFilePath: escProjPath,
+          pouPath: sanPouPath,
+          args: {
+            declarationCode: args.declarationCode,
+            implementationCode: args.implementationCode,
+          },
+        });
+        if (gate.status === 'rejected') {
+          return {
+            content: [{ type: 'text' as const, text: gate.message }],
+            isError: false,
+          };
+        }
+        if (gate.status === 'error') {
+          return {
+            content: [{ type: 'text' as const, text: `Approve gate error: ${gate.message}` }],
+            isError: true,
+          };
+        }
+        // 'accepted' or 'no-existing' → fall through and apply the change.
+      }
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,

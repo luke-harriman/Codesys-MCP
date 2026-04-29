@@ -4,7 +4,8 @@
   "description": "Codesys-MCP-SP21+ -- fork of luke-harriman/Codesys-MCP carrying CODESYS V3.5 SP22 Patch 1 fixes (and forward-compat with later SPs): script-engine API drift, online/runtime tool auto-login, dual-SHA release classifier, set_pou_code omitted-decl wipe fix, add_library managed-overload, etc. MCP server for CODESYS with persistent UI instance and file-based IPC.",
   "main": "dist/server.js",
   "bin": {
-    "codesys-mcp-sp21-plus": "dist/bin.js"
+    "codesys-mcp-sp21-plus": "dist/bin.js",
+    "phobiCS-tui": "dist/tui/index.js"
   },
   "files": [
     "dist/",
@@ -12,10 +13,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && node -e \"require('fs').cpSync('src/scripts','dist/scripts',{recursive:true})\"",
+    "build": "tsc && tsc -p tsconfig.tui.json && node -e \"require('fs').cpSync('src/scripts','dist/scripts',{recursive:true})\" && node -e \"const fs=require('fs');fs.writeFileSync('dist/tui/package.json','{\\\"type\\\":\\\"module\\\"}');const p='dist/tui/index.js';fs.writeFileSync(p,'#!/usr/bin/env node\\n'+fs.readFileSync(p,'utf8'));\"",
+    "build:tui": "tsc -p tsconfig.tui.json",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.tui.json --noEmit",
     "prepublishOnly": "npm run build && npm test"
   },
   "keywords": [
@@ -39,14 +41,20 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
     "commander": "^11.1.0",
+    "ink": "^5.2.1",
+    "react": "^18.3.1",
     "ssh2": "^1.17.0",
     "uuid": "^9.0.0",
     "zod": "^3.24.3"
   },
   "devDependencies": {
+    "@types/diff": "^5.2.3",
     "@types/node": "^20.14.1",
+    "@types/react": "^18.3.28",
     "@types/ssh2": "^1.15.5",
     "@types/uuid": "^9.0.0",
+    "diff": "^5.2.2",
+    "ink-testing-library": "^4.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.5.3",
     "vitest": "^1.6.0"

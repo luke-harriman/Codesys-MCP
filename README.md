@@ -289,6 +289,22 @@ codesys-mcp-sp21-plus --ssh-version myplc.lan --ssh-user pi
 
 Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If your key isn't installed yet, the error message includes a one-line PowerShell recipe; full setup instructions live at [ssh-key-windows.md](https://gitlab.usv.no/karstein.kvistad/mr-ai-context/-/blob/main/ssh-key-windows.md).
 
+## phobiCS-tui
+
+This package ships a small ink TUI for browsing CODESYS-exported ST. After installing, run:
+
+    phobiCS-tui                          # auto-discovers mcp-mirror/ from cwd
+    phobiCS-tui <projectDir>             # explicit project directory
+    phobiCS-tui approve <a.st> <b.st>    # diff prompt; exit 0 = accept, 1 = reject, 2 = error
+
+Browser-mode keys: `j`/`k` (or `↓`/`↑`) move the cursor, `l`/`Enter`/`→` expand a device, `h`/`←` collapse, `q` quits.
+
+Approve-mode keys: `y` accept, `n`/`q`/`Esc` reject.
+
+The browser writes the current selection to `%LOCALAPPDATA%/codesys-mcp/tui-state.json` (Windows) or `$XDG_STATE_HOME/codesys-mcp/tui-state.json` (Linux/Mac, defaulting to `~/.local/state/...`). The MCP tool `get_user_selection` reads it so an agent can ground its actions in what the user is looking at.
+
+Approve mode is opt-in for the MCP server's modifying tools — start the server with `--approve-edits` to wire it in. v0.1 gates only `set_pou_code`; the rest of the modifying tools land in a follow-up. Off by default.
+
 ## MCP Tools
 
 41 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.

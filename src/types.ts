@@ -67,6 +67,12 @@ export interface ServerConfig extends LauncherConfig {
    * as a hard error -- the underlying edit already succeeded.
    */
   autoMirror: boolean;
+  /**
+   * If true, modifying tools (set_pou_code et al.) will shell out to
+   * phobiCS-tui in approve mode and only proceed on exit 0. Off by default
+   * so existing scripted flows are not regressed.
+   */
+  approveEdits?: boolean;
 }
 
 /** Script template parameters */

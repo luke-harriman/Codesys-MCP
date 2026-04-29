@@ -47,6 +47,7 @@ program
   .option('--fallback-headless', 'Fall back to headless if persistent fails', true)
   .option('--keep-alive', 'Keep CODESYS running after server stops', false)
   .option('--auto-mirror', 'Re-run mirror_export after every modifying tool so an external editor watching <projectDir>/mcp-mirror/ sees changes live', false)
+  .option('--approve-edits', 'Gate modifying MCP tools behind a phobiCS-tui y/n diff prompt', false)
   .option('--timeout <ms>', 'Default command timeout in ms', '60000')
   .option('--verbose', 'Enable verbose logging')
   .option('--debug', 'Enable debug logging (more verbose)')
@@ -197,6 +198,7 @@ if (opts.sshVersion) {
     debug: opts.debug || false,
     mode: (opts.mode === 'headless' ? 'headless' : 'persistent') as ExecutionMode,
     autoMirror: opts.autoMirror || false,
+    approveEdits: opts.approveEdits || false,
   };
 
   process.stderr.write(`Starting CODESYS MCP Server v${version}\n`);
@@ -206,6 +208,9 @@ if (opts.sshVersion) {
   process.stderr.write(`  Auto-launch: ${config.autoLaunch}\n`);
   if (config.autoMirror) {
     process.stderr.write(`  Auto-mirror: ENABLED (mirror_export runs after every edit)\n`);
+  }
+  if (config.approveEdits) {
+    process.stderr.write(`  Approve edits: ENABLED (modifying tools will prompt via phobiCS-tui)\n`);
   }
 
   startMcpServer(config).catch((err) => {
