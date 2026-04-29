@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 
@@ -91,6 +92,78 @@ export interface RunGateOpts {
   pouPath: string;
   args: SetPouCodeArgs;
   spawnFn?: typeof spawnApproveTui;
+}
+
+/**
+ * Generic approve-gate for tools that don't have a single existing-file -> proposed-file
+ * mapping. Renders an arbitrary "before" + "after" snapshot through the TUI's approve
+ * mode, with a descriptive temp-file name conveying the operation.
+ *
+ * For pure-create ops, oldText is ''. For pure-delete ops, newText is ''. For rename,
+ * both sides are short identifier names. The diff display always communicates the op
+ * intent visually (all-green for create, all-red for delete, single line each for rename).
+ */
+export interface ApproveGateOp {
+  /** Short slug used as the synthetic filename — drives what the user sees as "<file>.st". */
+  slug: string;
+  /** Pre-state. Empty string for create operations. */
+  oldText: string;
+  /** Post-state. Empty string for delete operations. */
+  newText: string;
+  /** Test-only override for the spawn function. */
+  spawnFn?: typeof spawnApproveTui;
+}
+
+export async function runApproveGateOp(op: ApproveGateOp): Promise<GateResult> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'phobics-gate-'));
+  const safeSlug = op.slug.replace(/[^A-Za-z0-9._-]+/g, '_');
+  const oldPath = path.join(dir, `${safeSlug}.before.st`);
+  const newPath = path.join(dir, `${safeSlug}.after.st`);
+  await fs.writeFile(oldPath, op.oldText, 'utf8');
+  await fs.writeFile(newPath, op.newText, 'utf8');
+  try {
+    const spawnFn = op.spawnFn ?? spawnApproveTui;
+    return await spawnFn(oldPath, newPath);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * MCP-tool-shaped wrapper around runApproveGateOp.
+ *
+ * Returns null when the operation should proceed (gate disabled, accepted, or
+ * mirror file missing for a non-set_pou_code op). Returns an MCP-shaped
+ * response object when the call should short-circuit (rejected -> isError=false
+ * with the user-rejection message; error -> isError=true with the spawn error).
+ */
+export interface BlockResponse {
+  content: Array<{ type: 'text'; text: string }>;
+  isError: boolean;
+}
+
+export async function gateOpForTool(opts: {
+  enabled: boolean;
+  slug: string;
+  oldText: string;
+  newText: string;
+  spawnFn?: typeof spawnApproveTui;
+}): Promise<BlockResponse | null> {
+  if (!opts.enabled) return null;
+  const gate = await runApproveGateOp({
+    slug: opts.slug,
+    oldText: opts.oldText,
+    newText: opts.newText,
+    spawnFn: opts.spawnFn,
+  });
+  if (gate.status === 'accepted' || gate.status === 'no-existing') return null;
+  if (gate.status === 'rejected') {
+    return { content: [{ type: 'text', text: gate.message }], isError: false };
+  }
+  return {
+    content: [{ type: 'text', text: `Approve gate error: ${gate.message}` }],
+    isError: true,
+  };
 }
 
 export async function runApproveGate(opts: RunGateOpts): Promise<GateResult> {

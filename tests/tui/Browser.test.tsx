@@ -11,8 +11,14 @@ const project: Project = {
     {
       name: 'D1',
       pous: [
-        { name: 'PLC_PRG', kind: 'PRG', relPath: 'PLC_PRG.st', absPath: '/abs/PLC_PRG.st', loc: 5, mtimeMs: 0 },
-        { name: 'FB_X',     kind: 'FB',  relPath: 'FB_X.st',     absPath: '/abs/FB_X.st',     loc: 9, mtimeMs: 0 },
+        { name: 'PLC_PRG', kind: 'PRG', relPath: 'PLC_PRG.st', absPath: '/abs/D1/PLC_PRG.st', loc: 5, mtimeMs: 0 },
+        { name: 'FB_X',     kind: 'FB',  relPath: 'FB_X.st',     absPath: '/abs/D1/FB_X.st',     loc: 9, mtimeMs: 0 },
+      ],
+    },
+    {
+      name: 'D2',
+      pous: [
+        { name: 'PLC_PRG', kind: 'PRG', relPath: 'PLC_PRG.st', absPath: '/abs/D2/PLC_PRG.st', loc: 5, mtimeMs: 0 },
       ],
     },
   ],
@@ -78,5 +84,170 @@ describe('<Browser>', () => {
     stdin.write('q');
     await flush();
     expect(onQuit).toHaveBeenCalled();
+  });
+
+  it('d on a POU with one same-name peer in another device opens the cross-device diff', async () => {
+    const reads: Record<string, string> = {
+      '/abs/D1/PLC_PRG.st': 'PROGRAM PLC_PRG\nVAR\n  v : INT;\nEND_VAR',
+      '/abs/D2/PLC_PRG.st': 'PROGRAM PLC_PRG\nVAR\n  v : DINT;\nEND_VAR',
+    };
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async (pou) => reads[pou.absPath] ?? ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    stdin.write('l');
+    await flush();
+    stdin.write('j');
+    await flush();
+    stdin.write('d');
+    await flush();
+    // wait for both readPou promises to settle
+    await new Promise((r) => setTimeout(r, 50));
+    const out = lastFrame()!;
+    expect(out).toMatch(/Cross-device diff/);
+    expect(out).toContain('D1');
+    expect(out).toContain('D2');
+  });
+
+  it('toggles a help overlay on ?', async () => {
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    expect(lastFrame()).not.toContain('Keybindings');
+    stdin.write('?');
+    await flush();
+    expect(lastFrame()).toContain('Keybindings');
+    stdin.write('?');
+    await flush();
+    expect(lastFrame()).not.toContain('Keybindings');
+  });
+
+  it('/ enters filter mode; typed chars filter the POU list', async () => {
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    stdin.write('/');
+    await flush();
+    expect(lastFrame()).toMatch(/Filter:/);
+    stdin.write('F');
+    stdin.write('B');
+    await flush();
+    expect(lastFrame()).toContain('FB_X');
+    expect(lastFrame()).not.toContain('PLC_PRG');
+  });
+
+  it('Esc cancels filter mode and clears the filter', async () => {
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    stdin.write('l');
+    await flush();
+    stdin.write('/');
+    await flush();
+    stdin.write('F');
+    await flush();
+    stdin.write('B');
+    await flush();
+    expect(lastFrame()).not.toContain('PLC_PRG');
+    stdin.write(String.fromCharCode(27));
+    await flush();
+    expect(lastFrame()).toContain('PLC_PRG');
+    expect(lastFrame()).not.toMatch(/Filter:/);
+  });
+
+  it('calls onOpenInEditor on o with the highlighted POU absPath', async () => {
+    const onOpenInEditor = vi.fn();
+    const { stdin } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+        onOpenInEditor={onOpenInEditor}
+      />
+    );
+    await flush();
+    stdin.write('l');
+    await flush();
+    stdin.write('j');
+    await flush();
+    stdin.write('o');
+    await flush();
+    expect(onOpenInEditor).toHaveBeenCalledWith('/abs/D1/PLC_PRG.st');
+  });
+
+  it('does not call onOpenInEditor when cursor is on a device row', async () => {
+    const onOpenInEditor = vi.fn();
+    const { stdin } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+        onOpenInEditor={onOpenInEditor}
+      />
+    );
+    await flush();
+    stdin.write('o');
+    await flush();
+    expect(onOpenInEditor).not.toHaveBeenCalled();
+  });
+
+  it('calls onRescan on r', async () => {
+    const onRescan = vi.fn();
+    const { stdin } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+        onRescan={onRescan}
+      />
+    );
+    await flush();
+    stdin.write('r');
+    await flush();
+    expect(onRescan).toHaveBeenCalled();
+  });
+
+  it('closes the help overlay on Esc', async () => {
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    stdin.write('?');
+    await flush();
+    expect(lastFrame()).toContain('Keybindings');
+    stdin.write(String.fromCharCode(27));
+    await flush();
+    expect(lastFrame()).not.toContain('Keybindings');
   });
 });

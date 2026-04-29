@@ -1,6 +1,7 @@
 import React from 'react';
 import { render } from 'ink';
 import * as fs from 'fs/promises';
+import { spawn } from 'child_process';
 import { Approve, Decision } from './approve/Approve.js';
 import { Browser } from './browser/Browser.js';
 import { walk } from './shared/scan.js';
@@ -13,7 +14,7 @@ const argv = process.argv.slice(2);
 
 async function main(): Promise<number> {
   if (argv[0] === '--version' || argv[0] === '-v') {
-    process.stdout.write('phobiCS-tui v0.1.0\n');
+    process.stdout.write('phobiCS-tui v0.2.0\n');
     return 0;
   }
   if (argv[0] === 'approve') return runApprove(argv[1], argv[2]);
@@ -51,12 +52,40 @@ async function runBrowser(maybeRoot: string | undefined): Promise<number> {
       resolve(0);
     };
     const readPou = (pou: { absPath: string }) => fs.readFile(pou.absPath, 'utf8');
+    const onOpenInEditor = (absPath: string) => {
+      const editor = process.env.EDITOR || 'code';
+      try {
+        const child = spawn(editor, [absPath], { stdio: 'ignore', detached: true, shell: true });
+        child.unref();
+      } catch (err) {
+        process.stderr.write(`phobiCS-tui: open-in-editor failed: ${(err as Error).message}\n`);
+      }
+    };
+    const onRescan = async () => {
+      try {
+        const next = await walk(root);
+        app.rerender(
+          <Browser
+            project={next}
+            readPou={readPou}
+            writeSelection={onWriteSelection}
+            onQuit={onQuit}
+            onRescan={onRescan}
+            onOpenInEditor={onOpenInEditor}
+          />
+        );
+      } catch (err) {
+        process.stderr.write(`phobiCS-tui: rescan failed: ${(err as Error).message}\n`);
+      }
+    };
     const app = render(
       <Browser
         project={project!}
         readPou={readPou}
         writeSelection={onWriteSelection}
         onQuit={onQuit}
+        onRescan={onRescan}
+        onOpenInEditor={onOpenInEditor}
       />
     );
   });

@@ -297,13 +297,15 @@ This package ships a small ink TUI for browsing CODESYS-exported ST. After insta
     phobiCS-tui <projectDir>             # explicit project directory
     phobiCS-tui approve <a.st> <b.st>    # diff prompt; exit 0 = accept, 1 = reject, 2 = error
 
-Browser-mode keys: `j`/`k` (or `↓`/`↑`) move the cursor, `l`/`Enter`/`→` expand a device, `h`/`←` collapse, `q` quits.
+Browser-mode keys: `j`/`k` (or `↓`/`↑`) move the cursor, `l`/`Enter`/`→` expand a device, `h`/`←` collapse, `/` filter POUs by name (Enter commits, Esc clears), `o` open the highlighted POU in `$EDITOR` (or VS Code), `d` diff against the same-named POU in another device, `r` re-scan `mcp-mirror/`, `?` toggle the help overlay, `q` quits.
 
-Approve-mode keys: `y` accept, `n`/`q`/`Esc` reject.
+Approve-mode keys: `y` accept, `n`/`q`/`Esc` reject, `v` toggle unified ↔ side-by-side diff.
 
-The browser writes the current selection to `%LOCALAPPDATA%/codesys-mcp/tui-state.json` (Windows) or `$XDG_STATE_HOME/codesys-mcp/tui-state.json` (Linux/Mac, defaulting to `~/.local/state/...`). The MCP tool `get_user_selection` reads it so an agent can ground its actions in what the user is looking at.
+The browser writes the current selection to `%LOCALAPPDATA%/codesys-mcp/tui-state.json` (Windows) or `$XDG_STATE_HOME/codesys-mcp/tui-state.json` (Linux/Mac, defaulting to `~/.local/state/...`). The MCP tool `get_user_selection` reads it so an agent can ground its actions in what the user is looking at. The header shows mirror staleness when the on-disk export is older than 10 s, and a yellow resize warning appears below 80×20.
 
-Approve mode is opt-in for the MCP server's modifying tools — start the server with `--approve-edits` to wire it in. v0.1 gates only `set_pou_code`; the rest of the modifying tools land in a follow-up. Off by default.
+The Viewer applies ST syntax highlighting (cyan keywords, magenta types, gray comments, yellow strings).
+
+Approve mode is opt-in for the MCP server's modifying tools — start the server with `--approve-edits` to wire it in. The v0.2 followup gates **all 9 modifying tools**: `create_pou`, `create_property`, `create_method`, `create_dut`, `create_gvl`, `create_folder`, `delete_object`, `rename_object`, `add_library` — plus the original `set_pou_code`. Each operation pops a y/n diff prompt; create/delete render as all-green/all-red one-sided diffs, rename as a del+add of the leaf name, and `set_pou_code` as a real diff against the existing mirror file. Off by default.
 
 ## MCP Tools
 
