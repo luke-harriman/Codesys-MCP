@@ -2066,6 +2066,44 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  s.tool(
+    'remove_library',
+    "Removes a library reference from the CODESYS project's Library Manager. Idempotent: if the named library is not currently referenced, the tool succeeds with a no-op confirmation rather than an error. Accepts either the bare library name (e.g. 'Standard') or the fully-qualified 'Name, Version (Company)' form. Verifies removal in lm.references before saving. Per helpme-codesys.com ScriptLibManObject docs and the local SP22 stub Stubs/scriptengine/ScriptLibManObject.pyi.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      libraryName: z.string().describe("Bare name of the library to remove (e.g. 'Standard', 'Util'). Must match a reference currently present in the project's Library Manager."),
+      libraryFqnOrName: z.string().optional().describe("Optional fully-qualified name 'Name, Version (Company)' to target a specific version when multiple references with the same bare name exist. Falls back to libraryName when omitted."),
+    },
+    async (args: { projectFilePath: string; libraryName: string; libraryFqnOrName?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const fqn = (args.libraryFqnOrName || args.libraryName).trim();
+      const script = scriptManager.prepareScriptWithHelpers(
+        'remove_library',
+        {
+          PROJECT_FILE_PATH: escaped,
+          LIBRARY_NAME: args.libraryName.trim(),
+          LIBRARY_FQN_OR_NAME: fqn,
+        },
+        ['ensure_project_open']
+      );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `remove-library-${args.libraryName.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
+        oldText: `(* remove Library *)\nname: ${args.libraryName}\nproject: ${args.projectFilePath}\n`,
+        newText: '',
+      });
+      if (blocked) return blocked;
+      const result = await executor.executeScript(script);
+      // Script emits "Library Not Present:" on the idempotent no-op path
+      // and "Library Removed:" on actual removal.
+      const noopHit = result.output.includes('Library Not Present:');
+      const successMessage = noopHit
+        ? `Library '${args.libraryName}' not referenced in ${args.projectFilePath}. No-op.`
+        : `Library '${args.libraryName}' removed from ${args.projectFilePath}. Project saved.`;
+      return await formatModifyingResponse(result, successMessage, escaped, mirrorCtx);
+    }
+  );
+
   // ─── Symbol Configuration Tools ───────────────────────────────────────
   //
   // Wraps ScriptSymbolConfigObject (since CODESYS 3.5.10.0). The Symbol

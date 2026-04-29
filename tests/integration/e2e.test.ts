@@ -148,6 +148,33 @@ describe('E2E Script Preparation', () => {
     expect(script).not.toMatch(/\{[A-Z_]+\}/);
   });
 
+  it('remove_library script renders without leftover placeholders and contains required markers', () => {
+    const script = mgr.prepareScriptWithHelpers(
+      'remove_library',
+      {
+        PROJECT_FILE_PATH: 'C:\\test.project',
+        LIBRARY_NAME: 'Standard',
+        LIBRARY_FQN_OR_NAME: 'Standard, 3.5.17.0 (System)',
+      },
+      ['ensure_project_open']
+    );
+    // Placeholders must all be substituted
+    expect(script).not.toMatch(/\{[A-Z_]+\}/);
+    // Substituted values must appear
+    expect(script).toContain('LIBRARY_NAME = "Standard"');
+    expect(script).toContain('LIBRARY_FQN_OR_NAME = "Standard, 3.5.17.0 (System)"');
+    // Core SP22 API call
+    expect(script).toContain('lm.remove_library' || 'remove_library');
+    expect(script).toContain('remove_library');
+    // references walk must be present (pre-check)
+    expect(script).toContain('references');
+    // Idempotent no-op marker
+    expect(script).toContain('Library Not Present');
+    // Success and error markers
+    expect(script).toContain('SCRIPT_SUCCESS');
+    expect(script).toContain('SCRIPT_ERROR');
+  });
+
   it('check_status script has no placeholders after load', () => {
     const script = mgr.loadTemplate('check_status');
     // check_status has no {PLACEHOLDER} params
