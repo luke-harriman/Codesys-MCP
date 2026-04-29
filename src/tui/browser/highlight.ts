@@ -42,17 +42,25 @@ const TYPES = new Set([
 
 const IDENT_RE = /[A-Z_][A-Z0-9_]*/;
 
-export function tokenize(line: string): Token[] {
+/**
+ * Tokenize a single line. If `openComment` is true, the line is treated as
+ * starting inside a (* ... *) block; output includes a `commentLeftOpen`
+ * flag so callers can continue the state across lines.
+ */
+export interface TokenizeResult {
+  tokens: Token[];
+  /** True if the line ended without closing a (* block. */
+  commentLeftOpen: boolean;
+}
+
+export function tokenizeWithState(line: string, openComment: boolean): TokenizeResult {
   const out: Token[] = [];
   let i = 0;
+  let inComment = openComment;
   let pending = '';
 
   const flushPending = () => {
     if (!pending) return;
-    // Walk pending and split at every uppercase identifier boundary, so
-    // identifiers (whether keyword/type or plain) come out as their own
-    // tokens. Anything else (whitespace, punctuation, lowercase ids) is
-    // emitted as 'text'.
     const re = /[A-Z_][A-Z0-9_]*/g;
     let last = 0;
     let m: RegExpExecArray | null;
@@ -68,18 +76,29 @@ export function tokenize(line: string): Token[] {
     pending = '';
   };
 
+  // If line started inside a comment, eat up to "*)" or end-of-line.
+  if (inComment) {
+    const end = line.indexOf('*)');
+    if (end < 0) {
+      out.push({ kind: 'comment', text: line });
+      return { tokens: out, commentLeftOpen: true };
+    }
+    out.push({ kind: 'comment', text: line.slice(0, end + 2) });
+    i = end + 2;
+    inComment = false;
+  }
+
   while (i < line.length) {
-    // (* ... *) inline comment
+    // (* ... *) — may be inline or open-ended.
     if (line[i] === '(' && line[i + 1] === '*') {
       flushPending();
       const end = line.indexOf('*)', i + 2);
       if (end < 0) {
         out.push({ kind: 'comment', text: line.slice(i) });
-        i = line.length;
-      } else {
-        out.push({ kind: 'comment', text: line.slice(i, end + 2) });
-        i = end + 2;
+        return { tokens: out, commentLeftOpen: true };
       }
+      out.push({ kind: 'comment', text: line.slice(i, end + 2) });
+      i = end + 2;
       continue;
     }
     // // line comment
@@ -89,7 +108,7 @@ export function tokenize(line: string): Token[] {
       i = line.length;
       continue;
     }
-    // 'single' or "double" strings (no escape handling beyond doubled quotes)
+    // 'single' or "double" strings
     if (line[i] === "'" || line[i] === '"') {
       flushPending();
       const quote = line[i];
@@ -104,6 +123,21 @@ export function tokenize(line: string): Token[] {
     i++;
   }
   flushPending();
-  // Normalize: empty trailing 'text' tokens are fine; we keep them so the line's column structure is preserved.
+  return { tokens: out, commentLeftOpen: false };
+}
+
+export function tokenize(line: string): Token[] {
+  return tokenizeWithState(line, false).tokens;
+}
+
+/** Tokenize a contiguous block of lines, threading (* ... *) state across line boundaries. */
+export function tokenizeLines(lines: string[]): Token[][] {
+  const out: Token[][] = [];
+  let openComment = false;
+  for (const line of lines) {
+    const r = tokenizeWithState(line, openComment);
+    out.push(r.tokens);
+    openComment = r.commentLeftOpen;
+  }
   return out;
 }
