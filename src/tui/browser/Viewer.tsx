@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { POU } from '../shared/types.js';
-import { tokenize, TokenKind } from './highlight.js';
+import { Token, tokenizeLines, TokenKind } from './highlight.js';
 
 const COLORS: Record<TokenKind, string | undefined> = {
   keyword: 'cyan',
@@ -11,8 +11,7 @@ const COLORS: Record<TokenKind, string | undefined> = {
   text: undefined,
 };
 
-function HighlightedLine({ line }: { line: string }): React.ReactElement {
-  const tokens = React.useMemo(() => tokenize(line), [line]);
+function HighlightedTokens({ tokens }: { tokens: Token[] }): React.ReactElement {
   return (
     <Text>
       {tokens.map((t, i) => (
@@ -40,16 +39,19 @@ export function Viewer({ pou, text, scrollTop, visibleRows }: ViewerProps): Reac
     );
   }
   const lines = text.split(/\r?\n/);
-  const slice = lines.slice(scrollTop, scrollTop + visibleRows);
+  // Tokenize from line 0 so multi-line (* ... *) state is correct, then
+  // slice the visible window. Cheap; line count is bounded by file size.
+  const allTokens = React.useMemo(() => tokenizeLines(lines), [text]);
+  const sliceTokens = allTokens.slice(scrollTop, scrollTop + visibleRows);
   return (
     <Box flexDirection="column">
       <Text bold>
         {pou.name}.st  ({pou.kind}, {pou.loc} L)
       </Text>
-      {slice.map((l, i) => (
+      {sliceTokens.map((tokens, i) => (
         <Text key={scrollTop + i}>
           <Text dimColor>{String(scrollTop + i + 1).padStart(4, ' ')}  </Text>
-          <HighlightedLine line={l} />
+          <HighlightedTokens tokens={tokens} />
         </Text>
       ))}
     </Box>

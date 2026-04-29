@@ -1776,6 +1776,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'ensure_online_connection']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `write-${args.variablePath.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
+        oldText: `(* live variable write *)\nvariable: ${args.variablePath}\nproject: ${args.projectFilePath}\n`,
+        newText: `(* live variable write *)\nvariable: ${args.variablePath}\nvalue:    ${args.value}\nproject:  ${args.projectFilePath}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return formatToolResponse(
         result,
@@ -1808,6 +1815,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['register_device_credentials', 'ensure_project_open', 'ensure_online_connection']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `download-${args.projectFilePath.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-40)}`,
+        oldText: '',
+        newText: `(* DOWNLOAD TO DEVICE *)\nproject: ${args.projectFilePath}\nWARNING: pushes the compiled application to the live PLC.\n`,
+      });
+      if (blocked) return blocked;
       // Tool-side timeout = wait window + 120s headroom for the actual download
       const ipcTimeoutMs = (waitSec + 120) * 1000;
       const result = await executor.executeScript(script, ipcTimeoutMs);
@@ -1832,6 +1846,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'ensure_online_connection']
       );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `app-${args.action}`,
+        oldText: '',
+        newText: `(* PLC application ${args.action.toUpperCase()} *)\nproject: ${args.projectFilePath}\n`,
+      });
+      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return formatToolResponse(
         result,
@@ -2889,6 +2910,15 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       livenessPort?: number;
       connectTimeoutMs?: number;
     }) => {
+      const host = args.host ?? 'codesys-pi.local';
+      const service = args.service ?? 'codesyscontrol';
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `restart-${host.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
+        oldText: '',
+        newText: `(* RESTART RUNTIME via SSH *)\nhost:    ${host}\nservice: ${service}\nWARNING: kicks the live PLC runtime; running app stops momentarily.\n`,
+      });
+      if (blocked) return blocked;
       try {
         const res = await restartCodesysRuntime(args);
         const ok = res.restartExitCode === 0 && (res.listening === true || res.listening === null);

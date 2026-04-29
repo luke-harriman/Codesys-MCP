@@ -70,16 +70,16 @@ Ten new tools wrap `ScriptSymbolConfigObject` (CODESYS 3.5.10.0+) per the plan i
 
 | # | Tool                          | Vitest | Live SP22 | Notes |
 |---|-------------------------------|--------|-----------|-------|
-| 1 | `find_symbol_config`          | OK     | pending   | Template-prep test asserts marker-walk + path serialiser |
-| 2 | `list_all_signatures`         | OK     | pending   | `compile=true/false` both rendered |
-| 3 | `list_all_datatypes`          | OK     | pending   | Mirror of #2 over `get_all_datatypes()` |
-| 4 | `list_configured_symbols`     | OK     | pending   | Walks signatures + datatypes; serialises `configured_access` / `maximal_access` / `effective_access` per variable |
-| 5 | `get_symbol_config_settings`  | OK     | pending   | All 6 knobs + obstacle explanations + available layout calculators |
-| 6 | `create_symbol_config`        | OK     | pending   | Idempotent (refuse-with-success if already present); `application.create_symbol_config(exp, opc, guid)` |
-| 7 | `set_symbol_config_settings`  | OK     | pending   | Partial-update via per-field APPLY_* flags; refuses direct I/O if obstacles |
-| 8 | `set_symbol_access`           | OK     | pending   | Per-variable `configured_access` with enum probe + int-literal fallback |
-| 9 | `set_signature_access_bulk`   | OK     | pending   | Iterates `sig.variables`, reports `changed` + `skipped` |
-|10 | `export_symbol_xsd`           | OK     | pending   | `get_symbol_configuration_xsd()` bytes -> file (UTF-8) |
+| 1 | `find_symbol_config`          | OK     | OK (2026-04-29) | Returned `count=0` on virgin MCPTest2, then `count=1` (`CodesysRpi/Plc Logic/Application/Symbols`) after create. |
+| 2 | `list_all_signatures`         | OK     | partial   | `compile=true` returned `count=0` on the empty-PLC_PRG MCPTest2 -- script ran cleanly, no crash, but the build short-circuited. Re-run on a project with real signatures (e.g. X33). |
+| 3 | `list_all_datatypes`          | OK     | not run   | Skipped after #8/#9/#10 destabilised the watcher. |
+| 4 | `list_configured_symbols`     | OK     | OK (2026-04-29) | Returned `signature_count=0, datatype_count=0` on freshly-created Symbol Configuration -- expected. |
+| 5 | `get_symbol_config_settings`  | OK     | OK (2026-04-29) | Pre-set: `SupportOPCUA, XmlIncludeComments` (= 0x20001 default for SP22). Comment filter default is `None`, **not** `Both` as the plan predicted -- plan was wrong. |
+| 6 | `create_symbol_config`        | OK     | OK (2026-04-29) | Created `Application/Symbols`. (One CODESYS crash *immediately after* create on the first run; restart-and-retry succeeded -- see "Caveats" below.) |
+| 7 | `set_symbol_config_settings`  | OK     | OK (2026-04-29) | Wrote `[SupportOPCUA, IncludeComments, IncludeExecutables]`; re-read showed `content_feature_flags_int=19` (configured) / `effective=3` (IncludeExecutables masked off in `effective` -- normal SP22 runtime clamp). |
+| 8 | `set_symbol_access`           | OK     | not run   | Skipped after #9 timed out the watcher. Calls `get_all_signatures(True)` on the not-yet-configured fallback path -- same instability as #9. |
+| 9 | `set_signature_access_bulk`   | OK     | crash     | `Application.PLC_PRG ReadWrite` -> 60s timeout -> CODESYS exited with 0xFFFFFFFF. Suspected: the `get_all_signatures(True)` second-fallback re-builds, and the build crashes on this project (likely related to the Pi-only IoDrvGPIO managed library). Needs a project with a real, build-clean PLC_PRG. |
+|10 | `export_symbol_xsd`           | OK     | crash     | Same failure mode as #9. `get_symbol_configuration_xsd()` may also trigger an internal build. |
 
 **Vitest column**: `tests/integration/e2e.test.ts` -- 10 new template-prep assertions added; full suite 107/107 passing (excluding the orphan `.worktrees/phobics-tui` suite). Each test renders the script with realistic placeholders and asserts:
   - no leftover `{PLACEHOLDER}` in the rendered output,
@@ -87,7 +87,9 @@ Ten new tools wrap `ScriptSymbolConfigObject` (CODESYS 3.5.10.0+) per the plan i
   - the helper functions are pulled in (`find_symbol_config_object`, `ensure_symbol_config`, `symbol_config_path`).
   - additionally Python 3 `ast.parse` was run against every script to catch any IronPython 2.7 syntax that Py3 would also flag.
 
-**Live SP22 column**: deferred -- the Claude Code session's MCP tool list was negotiated at session start and doesn't refresh when the MCP server registers new tools mid-session. To run the live cycle, start a new Claude Code session (the symlinked global npm package will pick up the new build automatically) and execute the round-trip from the plan:
+**Live SP22 column** (updated 2026-04-29 morning): partial pass -- 5/10 verified end-to-end, 2/10 crashed, 3/10 skipped after the crashes. Symbol-Configuration *creation, settings persistence, and read-only inspection* all work cleanly on SP22 P1. The build-triggering tools (`set_signature_access_bulk`, `set_symbol_access` via fallback, `export_symbol_xsd`) need a project that builds cleanly headless -- MCPTest2's empty PLC_PRG body + IoDrvGPIO managed library cause `application.build()` (called by `get_all_signatures(True)` and likely `get_symbol_configuration_xsd()`) to abort the process with exit 0xFFFFFFFF. Plan to re-run on a project with a real, build-clean POU body (e.g. a fresh `Standard project` template under SP22 with PLC_PRG containing one assignment).
+
+To run the live cycle from scratch on a different project, start a new Claude Code session (the symlinked global npm package will pick up the new build automatically) and execute the round-trip from the plan:
 
 ```
 1. mcp__codesys__open_project MCPTest2.project
@@ -110,3 +112,12 @@ The plan also calls out the `SymbolAccess` enum-value probe risk: the SP22 stub 
 ---
 
 *Function test executed against this fork @ HEAD `f34d002` on 2026-04-28; symbol-config tools added in `db688c2` and verified via vitest the same evening.*
+
+---
+
+## Symbol-config live re-run notes (2026-04-29 morning, HEAD `e948922`)
+
+- **Crash pattern.** Three of the build-triggering tools (`get_all_signatures(True)` on a not-yet-configured Symbol Configuration, `set_signature_access_bulk` via the same fallback, and `export_symbol_xsd`) caused CODESYS to exit with 0xFFFFFFFF (NTSTATUS `STATUS_INVALID_HANDLE` / generic crash) on MCPTest2. The MCP launcher correctly reported state=error; restart-and-retry was always sufficient to recover. The crashes were *project-specific* -- `set_symbol_config_settings` flag-write succeeded on the *second* attempt with no code change between the failed and successful runs, suggesting a transient build-state race rather than a tool defect.
+- **Wrapper message fix landed in `e948922`.** `add_library` no longer renders "Library 'X' added" on the dedup no-op path -- it now reads the script's `Library Already Present:` marker and renders "already referenced". Cosmetic todo from this doc closed.
+- **Session ledger** (per `feedback_session_ledger.md` user rule): every CODESYS launch / shutdown / kill during this run logged to `~/.claude/projects/<id>/state/session_ledger.jsonl` so a next session knows which CODESYS.exe PIDs are mine to reclaim.
+- **Symbol-config side effect on MCPTest2**: a `Symbols` object was created under `CodesysRpi/Plc Logic/Application` and `content_feature_flags=19` was persisted. `git restore` the `.project` binary, or `delete_object Application/Symbols` from a fresh session, to revert.
