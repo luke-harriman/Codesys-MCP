@@ -16,6 +16,14 @@ import { ExecutorProxy } from './executor-proxy';
 import { parseResultJson } from './result-parser';
 import { serverLog, setLogLevel } from './logger';
 
+let SERVER_VERSION = '0.0.0';
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  SERVER_VERSION = require('../package.json').version;
+} catch {
+  // package.json not found at runtime; fall through with the placeholder.
+}
+
 /** Resolve a file path to an absolute normalized path */
 function resolvePath(filePath: string, workspaceDir: string): string {
   return path.normalize(
@@ -62,7 +70,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   if (config.debug) setLogLevel('debug');
   else if (config.verbose) setLogLevel('info');
 
-  serverLog.info(`Starting CODESYS Persistent MCP Server v0.1.0`);
+  serverLog.info(`Starting CODESYS Persistent MCP Server v${SERVER_VERSION}`);
   serverLog.info(`Mode: ${config.mode}`);
   serverLog.info(`CODESYS Path: ${config.codesysPath}`);
   serverLog.info(`Profile: ${config.profileName}`);
@@ -106,7 +114,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   const server = new McpServer(
     {
       name: 'CODESYS Persistent MCP Server',
-      version: '0.1.0',
+      version: SERVER_VERSION,
     },
     {
       capabilities: {
