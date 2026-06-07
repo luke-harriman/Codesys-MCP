@@ -1,15 +1,16 @@
+# -*- coding: utf-8 -*-
 # Shared text-encoding helpers for IronPython 2.7 inside CODESYS.
 # Prepended to other scripts via ScriptManager.prepareScriptWithHelpers.
 
 def _to_unicode(s):
     """Coerce any byte/str/unicode value to unicode, defensively.
 
-    CODESYS textual fields can return cp1252-encoded bytes (e.g. lone 0xA7
-    for the section sign). IronPython 2.7's json.dumps with the default
-    ensure_ascii=True invokes a defective decode path
-    (py_encode_basestring_ascii calls s.decode('utf-8') even on unicode),
-    so callers must serialise with ensure_ascii=False AND ensure all
-    string values are unicode (not raw bytes that fail to round-trip).
+    CODESYS textual fields return bytes in the system's ANSI code page:
+    cp1252 on Western European Windows, cp936 (GBK) on Chinese Windows.
+    IronPython 2.7's json.dumps with the default ensure_ascii=True invokes
+    a defective decode path (py_encode_basestring_ascii calls
+    s.decode('utf-8') even on unicode), so callers must serialise with
+    ensure_ascii=False AND ensure all string values are unicode.
     """
     if s is None:
         return u""
@@ -19,9 +20,12 @@ def _to_unicode(s):
         return s.decode('utf-8')
     except UnicodeDecodeError:
         try:
-            return s.decode('cp1252')
+            return s.decode('cp936')       # GBK — Chinese Windows
         except UnicodeDecodeError:
-            return s.decode('latin-1', errors='replace')
+            try:
+                return s.decode('cp1252')  # Western European Windows
+            except UnicodeDecodeError:
+                return s.decode('latin-1', errors='replace')
 
 
 def _json_default(o):

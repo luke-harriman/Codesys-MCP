@@ -22,6 +22,32 @@ function pyEscape(s: string): string {
     .replace(/\t/g, '\\t');
 }
 
+/**
+ * Escape a string for safe embedding inside an IronPython 2.7 u"""..."""
+ * triple-quoted unicode literal via {KEY:raw} substitution.
+ *
+ * Raw substitution is only used by set_pou_code for declaration/implementation
+ * code bodies. In Python 2, u"""...""" strings interpret backslash escapes
+ * (\n → newline, \uXXXX → unicode char), so we must escape literal backslashes
+ * in the content. Non-ASCII characters are converted to \uXXXX / \UXXXXXXXX
+ * escapes so the generated Python source stays ASCII-only and produces correct
+ * unicode strings for the CODESYS .NET API.
+ */
+function pyRawEscape(s: string): string {
+  // Escape backslashes first so literal \n, \t, \u etc. in the content
+  // aren't interpreted as escapes by Python's u"""...""" parser.
+  let result = s.replace(/\\/g, '\\\\');
+  // Convert non-ASCII characters to Python unicode escapes.
+  // Uses codePointAt to correctly handle supplementary-plane characters.
+  return result.replace(/[^\x00-\x7F]/g, (c) => {
+    const cp = c.codePointAt(0)!;
+    if (cp <= 0xFFFF) {
+      return '\\u' + cp.toString(16).padStart(4, '0');
+    }
+    return '\\U' + cp.toString(16).padStart(8, '0');
+  });
+}
+
 export class ScriptManager {
   private scriptsDir: string;
 
@@ -62,7 +88,7 @@ export class ScriptManager {
       const escaped = pyEscape(String(value));
       const escapedPattern = new RegExp(`\\{${key}\\}`, 'g');
       const rawPattern = new RegExp(`\\{${key}:raw\\}`, 'g');
-      result = result.replace(rawPattern, () => String(value));
+      result = result.replace(rawPattern, () => pyRawEscape(String(value)));
       result = result.replace(escapedPattern, () => escaped);
     }
     return result;

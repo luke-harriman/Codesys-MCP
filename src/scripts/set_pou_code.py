@@ -1,8 +1,9 @@
+# -*- coding: utf-8 -*-
 import sys, scriptengine as script_engine, os, traceback
 
 POU_FULL_PATH = "{POU_FULL_PATH}" # Expecting format like "Application/MyPOU" or "Folder/SubFolder/MyPOU"
-DECLARATION_CONTENT = """{DECLARATION_CONTENT}"""
-IMPLEMENTATION_CONTENT = """{IMPLEMENTATION_CONTENT}"""
+DECLARATION_CONTENT = u"""{DECLARATION_CONTENT}"""
+IMPLEMENTATION_CONTENT = u"""{IMPLEMENTATION_CONTENT}"""
 UPDATE_DECL_FLAG = "{UPDATE_DECL}"  # "1" if caller passed declarationCode, "0" if omitted/empty
 UPDATE_IMPL_FLAG = "{UPDATE_IMPL}"  # "1" if caller passed implementationCode, "0" if omitted/empty
 

@@ -46,7 +46,7 @@ export class HeadlessExecutor implements ScriptExecutor {
     try {
       // Write script to temp file
       const normalized = scriptContent.replace(/\r\n/g, '\n');
-      fs.writeFileSync(tempFilePath, normalized, 'latin1');
+      fs.writeFileSync(tempFilePath, normalized, 'utf-8');
       headlessLog.debug(`Temp script written: ${tempFilePath}`);
 
       // Build command

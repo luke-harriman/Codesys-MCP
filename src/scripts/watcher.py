@@ -146,8 +146,8 @@ try:
             script_path = command_data.get("scriptPath", "")
             if not os.path.exists(script_path):
                 raise IOError("Script file not found: %s" % script_path)
-            with open(script_path, "r") as f:
-                script_code = f.read()
+            with open(script_path, "rb") as f:
+                script_code = f.read().decode('utf-8')
         except Exception as read_err:
             _log("Error reading command: %s" % read_err)
             atomic_write(result_path, json.dumps({
